@@ -1,0 +1,39 @@
+{
+  "name": "khodrochare-backend",
+  "version": "1.0.0",
+  "description": "Khodrochare customer and roadside assistance API",
+  "main": "src/server.js",
+  "private": true,
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test test/domain.test.js test/services.test.js test/http.test.js test/realtime.test.js",
+    "test:integration": "node --test test/integration.test.js",
+    "prisma:generate": "prisma generate",
+    "prisma:validate": "prisma validate",
+    "db:migrate": "prisma migrate deploy",
+    "setup": "node scripts/setup-env.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@prisma/client": "^6.19.3",
+    "bullmq": "^6.3.17",
+    "cors": "^2.8.6",
+    "dotenv": "^18.0.8",
+    "express": "^5.3.0",
+    "helmet": "^8.3.0",
+    "ioredis": "^6.0.0",
+    "multer": "^2.3.0",
+    "prisma": "^6.19.3",
+    "socket.io": "^4.8.4",
+    "zod": "^4.6.7"
+  },
+  "overrides": { "deepmerge-ts": "8.0.0" },
+  "devDependencies": {
+    "socket.io-client": "^4.8.4"
+  }
+}

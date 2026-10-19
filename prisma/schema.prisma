@@ -1,0 +1,119 @@
+generator client {
+  provider = "prisma-client-js"
+}
+datasource db {
+  provider = "postgresql"
+  url = env("DATABASE_URL")
+}
+enum Role {
+  CUSTOMER
+  DRIVER
+}
+enum Service {
+  REPAIR
+  MOBILE_CARWASH
+  PERIODIC_SERVICE
+  TOWING
+  INSPECTION
+}
+enum RequestStatus {
+  PENDING
+  ACCEPTED
+  ARRIVED
+  COMPLETED
+  CANCELLED
+}
+model User {
+  id String @id @default(uuid())
+  role Role
+  fullName String
+  phone String
+  nationalId String
+  passwordHash String
+  vehiclePlate String?
+  vehicleType String?
+  services Service[]
+  identityDocumentId String? @unique
+  identityDocument Document? @relation("Identity", fields: [identityDocumentId], references: [id])
+  documents Document[] @relation("OwnedDocuments")
+  vehicles Vehicle[]
+  sessions Session[]
+  requests AssistanceRequest[] @relation("CustomerRequests")
+  assignments AssistanceRequest[] @relation("DriverRequests")
+  location DriverLocation?
+  createdAt DateTime @default(now())
+  @@unique([role, phone])
+  @@unique([role, nationalId])
+}
+model Session {
+  id String @id @default(uuid())
+  tokenHash String @unique
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  @@index([expiresAt])
+}
+model Document {
+  id String @id @default(uuid())
+  storageKey String @unique
+  mimeType String
+  ownerId String?
+  owner User? @relation("OwnedDocuments", fields: [ownerId], references: [id])
+  identityFor User? @relation("Identity")
+  vehicleId String?
+  vehicle Vehicle? @relation(fields: [vehicleId], references: [id])
+  uploadTokenHash String?
+  createdAt DateTime @default(now())
+}
+model Vehicle {
+  id String @id @default(uuid())
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name String
+  plate String
+  documents Document[]
+}
+model AssistanceRequest {
+  id String @id @default(uuid())
+  customerId String
+  customer User @relation("CustomerRequests", fields: [customerId], references: [id])
+  driverId String?
+  driver User? @relation("DriverRequests", fields: [driverId], references: [id])
+  service Service
+  status RequestStatus @default(PENDING)
+  vehicleName String
+  vehiclePlate String
+  problem String?
+  originLat Float
+  originLng Float
+  destinationLat Float?
+  destinationLng Float?
+  origin Unsupported("geography(Point,4326)")?
+  destination Unsupported("geography(Point,4326)")?
+  distanceMeters Int?
+  distanceMethod String?
+  priceToman Int?
+  pricingVersion String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  acceptedAt DateTime?
+  @@index([customerId, createdAt])
+  @@index([driverId, status])
+  @@index([status, service])
+}
+model DriverLocation {
+  driverId String @id
+  driver User @relation(fields: [driverId], references: [id], onDelete: Cascade)
+  latitude Float
+  longitude Float
+  point Unsupported("geography(Point,4326)")?
+  recordedAt DateTime
+}
+model Outbox {
+  id String @id @default(uuid())
+  requestId String
+  publishedAt DateTime?
+  createdAt DateTime @default(now())
+  @@index([publishedAt])
+}

@@ -1,0 +1,18 @@
+# Use with a separate compose project and volumes; never use with production project name.
+services:
+  postgres:
+    environment:
+      POSTGRES_DB: khodrochare_test
+  api:
+    restart: 'no'
+    environment:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/khodrochare_test?schema=public
+      DISTANCE_MODE: geodesic
+      TOW_BASE_TOMAN: 200000
+      TOW_PER_KM_TOMAN: 20000
+      RUN_INTEGRATION: '1'
+    command: [sh, -c, 'npx prisma migrate deploy && node --test test/integration.test.js']
+    ports: !reset []
+    healthcheck:
+      disable: true

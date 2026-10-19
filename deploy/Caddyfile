@@ -1,0 +1,6 @@
+{$API_DOMAIN} {
+  request_body {
+    max_size 6MB
+  }
+  reverse_proxy api:4000
+}
