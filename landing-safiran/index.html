@@ -1,0 +1,324 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>سفیران خودروچاره | پیوستن، دانلود اپ و شروع کار</title>
+<meta name="description" content="سفیر خودروچاره شوید: بارهای آمادهٔ امداد و حمل، اپلیکیشن اختصاصی سفیران، لوازم یدکی با تضمین کف قیمت، کارت امدادگری، آرم و علائم معتبر راهور، بیمه با نرخ کمتر و بسیاری مزایای دیگر.">
+<meta property="og:title" content="سفیران خودروچاره — جاده دست ماست">
+<meta property="og:description" content="ثبت‌نام، دریافت کارت امدادگری و نصب اپلیکیشن سفیران خودروچاره">
+<meta property="og:type" content="website">
+<meta property="og:locale" content="fa_IR">
+<!-- TODO: لوگوی اشتراک‌گذاری را جایگزین کنید
+<meta property="og:image" content="https://api.khodrochare.ir/og-safiran.png"> -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0b1220; --bg2:#101a2e; --card:#141f36; --line:#233250;
+    --ink:#eaf0fa; --muted:#9fb0cc; --gold:#f5b13d; --gold2:#ffd985;
+    --green:#2fd08a; --blue:#4aa8ff; --radius:18px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:radial-gradient(1200px 600px at 85% -10%, #1b2c52 0%, var(--bg) 55%) fixed,var(--bg);color:var(--ink);
+       font-family:"Vazirmatn",system-ui,-apple-system,"Segoe UI",Tahoma,sans-serif;line-height:1.9;font-size:16px}
+  a{color:inherit;text-decoration:none}
+  .wrap{max-width:1080px;margin-inline:auto;padding:0 20px}
+  header{position:sticky;top:0;z-index:20;background:rgba(11,18,32,.82);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+  .bar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:900;font-size:18px}
+  .brand .logo{width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,var(--gold),#e2820f);display:grid;place-items:center;color:#1a1206;font-weight:900;box-shadow:0 6px 18px rgba(245,177,61,.35)}
+  nav{display:flex;gap:18px;color:var(--muted);font-size:14px}
+  nav a:hover{color:var(--ink)}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border-radius:14px;padding:12px 22px;font-weight:800;border:1px solid transparent;transition:.2s;cursor:pointer;font-family:inherit;font-size:15px}
+  .btn-gold{background:linear-gradient(135deg,var(--gold2),var(--gold));color:#241703;box-shadow:0 10px 26px rgba(245,177,61,.32)}
+  .btn-gold:hover{transform:translateY(-2px)}
+  .btn-ghost{border-color:var(--line);color:var(--ink);background:rgba(255,255,255,.03)}
+  .btn-ghost:hover{border-color:var(--gold);color:var(--gold2)}
+  .hero{padding:72px 0 48px;position:relative;overflow:hidden}
+  .badge-top{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);background:rgba(47,208,138,.08);color:var(--green);border-radius:999px;padding:6px 14px;font-size:13px;font-weight:700}
+  h1{font-size:clamp(30px,5.2vw,52px);line-height:1.35;font-weight:900;margin:18px 0 10px}
+  h1 .gold{color:var(--gold)}
+  .sub{color:var(--muted);font-size:clamp(15px,2vw,18px);max-width:640px;margin-bottom:26px}
+  .cta-row{display:flex;flex-wrap:wrap;gap:12px}
+  .hero-card{position:absolute;inset-inline-end:-90px;top:40px;width:340px;opacity:.9;display:none}
+  @media(min-width:980px){.hero-card{display:block}}
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:40px 0 8px}
+  .stat{border:1px solid var(--line);background:var(--card);border-radius:var(--radius);padding:16px;text-align:center}
+  .stat b{display:block;font-size:22px;color:var(--gold2)}
+  .stat span{font-size:13px;color:var(--muted)}
+  section{padding:56px 0}
+  h2{font-size:clamp(22px,3.4vw,32px);font-weight:900;margin:0 0 6px}
+  .h2sub{color:var(--muted);margin:0 0 28px;max-width:700px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:16px}
+  .card{position:relative;border:1px solid var(--line);background:linear-gradient(180deg,rgba(255,255,255,.035),rgba(255,255,255,.01));border-radius:var(--radius);padding:22px;overflow:hidden}
+  .card .num{position:absolute;inset-block-start:14px;inset-inline-start:16px;font-weight:900;font-size:44px;color:rgba(245,177,61,.14);line-height:1}
+  .ic{width:46px;height:46px;border-radius:13px;display:grid;place-items:center;background:rgba(245,177,61,.12);border:1px solid rgba(245,177,61,.25);margin-bottom:12px}
+  .ic svg{width:24px;height:24px;stroke:var(--gold);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+  .card h3{margin:2px 0 6px;font-size:18px;font-weight:800}
+  .card p{margin:0;color:var(--muted);font-size:14.5px}
+  .chip{display:inline-block;font-size:11.5px;font-weight:700;color:var(--gold2);background:rgba(245,177,61,.1);border:1px solid rgba(245,177,61,.25);border-radius:999px;padding:2px 10px;margin-top:12px}
+  .steps{counter-reset:st;display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px}
+  .step{border:1px dashed var(--line);border-radius:var(--radius);padding:20px;background:rgba(255,255,255,.02)}
+  .step::before{counter-increment:st;content:counter(st);display:grid;place-items:center;width:34px;height:34px;border-radius:50%;background:var(--gold);color:#241703;font-weight:900;margin-bottom:10px}
+  .step b{display:block;margin-bottom:4px}
+  .step p{margin:0;color:var(--muted);font-size:14px}
+  .split{display:grid;grid-template-columns:1.15fr .85fr;gap:18px;align-items:stretch}
+  @media(max-width:860px){.split{grid-template-columns:1fr}}
+  .panel{border:1px solid var(--line);background:var(--card);border-radius:var(--radius);padding:24px}
+  .dl-list{display:grid;gap:10px;margin-top:14px}
+  .dl{display:flex;align-items:center;justify-content:space-between;gap:10px;border:1px solid var(--line);border-radius:14px;padding:13px 16px;background:rgba(255,255,255,.03);transition:.2s;font-weight:700}
+  .dl:hover{border-color:var(--gold);transform:translateY(-1px)}
+  .muted{color:var(--muted);font-size:13px}
+  ul.ticks{list-style:none;padding:0;margin:14px 0 0}
+  ul.ticks li{padding-inline-start:30px;position:relative;margin-bottom:10px;color:var(--ink);font-size:15px}
+  ul.ticks li::before{content:"";position:absolute;inset-inline-start:0;top:7px;width:18px;height:18px;border-radius:50%;
+    background:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="%232fd08a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>') center/contain no-repeat}
+  .more{display:flex;flex-wrap:wrap;gap:10px;margin-top:18px}
+  .more span{border:1px solid var(--line);border-radius:999px;padding:7px 14px;font-size:13.5px;color:var(--muted);background:rgba(255,255,255,.02)}
+  .final{background:linear-gradient(180deg,rgba(245,177,61,.10),rgba(245,177,61,.03));border:1px solid rgba(245,177,61,.3);border-radius:22px;padding:34px;display:flex;flex-wrap:wrap;gap:18px;align-items:center;justify-content:space-between}
+  .final h2{margin-bottom:4px}
+  footer{border-top:1px solid var(--line);padding:26px 0 90px;color:var(--muted);font-size:13.5px}
+  footer .wrap{display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap}
+  .mobile-cta{position:fixed;inset-inline:14px;bottom:14px;z-index:30;display:none;gap:10px}
+  .mobile-cta .btn{flex:1;padding:14px}
+  @media(max-width:720px){.mobile-cta{display:flex}nav{display:none}.stats{grid-template-columns:1fr 1fr}}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap bar">
+    <a class="brand" href="#top">
+      <span class="logo">خ</span>
+      <span>خودروچاره <span style="color:var(--gold)">| سفیران</span></span>
+    </a>
+    <nav>
+      <a href="#advantages">مزایا</a>
+      <a href="#steps">شروع کار</a>
+      <a href="#download">دانلود اپ</a>
+      <a href="#faq">پرسش‌ها</a>
+    </nav>
+    <a class="btn btn-gold" href="https://safir.khodrochare.ir/?ref=safiran">ورود / ثبت‌نام سفیر</a>
+  </div>
+</header>
+
+<main id="top">
+  <!-- ================= HERO ================= -->
+  <section class="hero">
+    <div class="wrap">
+      <span class="badge-top">● فراخوان پیوستن سفیران امداد و حمل خودرو — سراسری</span>
+      <h1>سفیر خودروچاره شو؛ <span class="gold">جاده، کارِ مطمئن است.</span></h1>
+      <p class="sub">
+        بارهای آماده و همیشه‌در‌دسترس، اپلیکیشن اختصاصی سفیران، لوازم یدکی با تضمین کف قیمت،
+        کارت امدادگری، آرم و علائم با بالاترین اعتبار راهور کشوری، بیمه با نرخ پایین‌تر
+        و ده‌ها امتیاز دیگر — همه در یک اکانت سفیر.
+      </p>
+      <div class="cta-row">
+        <a class="btn btn-gold" href="https://safir.khodrochare.ir/?ref=safiran">همین‌جا ثبت‌نام و ورود</a>
+        <a class="btn btn-ghost" href="#download">دانلود اپلیکیشن سفیران</a>
+      </div>
+
+      <div class="stats">
+        <div class="stat"><b>شبکه سراسری</b><span>بار امداد و حمل در شهرهای تحت پوشش</span></div>
+        <div class="stat"><b>درآمد شفاف</b><span>قیمت و مسافت، همان لحظهٔ ثبت درخواست</span></div>
+        <div class="stat"><b>پشتیبانی اختصاصی</b><span>خط ویژهٔ سفیران</span></div>
+        <div class="stat"><b>اعتبار رسمی</b><span>کارت امدادگری و علائم راهور</span></div>
+      </div>
+
+      <div class="hero-card">
+        <svg viewBox="0 0 340 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="تصویر کامیون یدک‌کش">
+          <defs>
+            <linearGradient id="g1" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#1b2c52"/><stop offset="1" stop-color="#101a2e"/>
+            </linearGradient>
+          </defs>
+          <rect x="10" y="10" width="320" height="280" rx="24" fill="url(#g1)" stroke="#233250"/>
+          <g stroke="#f5b13d" stroke-width="5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M60 190 h110 v-55 h-70 l-18 25 h-22 z"/>
+            <path d="M170 190 h95 l25 -35 h-40 v-25 h-80 z"/>
+            <path d="M250 130 v-22 M250 108 l40 -18" stroke-dasharray="8 8"/>
+          </g>
+          <circle cx="95" cy="200" r="17" fill="#0b1220" stroke="#eaf0fa" stroke-width="5"/>
+          <circle cx="205" cy="200" r="17" fill="#0b1220" stroke="#eaf0fa" stroke-width="5"/>
+          <circle cx="252" cy="200" r="17" fill="#0b1220" stroke="#eaf0fa" stroke-width="5"/>
+          <text x="170" y="250" text-anchor="middle" fill="#9fb0cc" font-family="Vazirmatn" font-size="15">خودروچاره — امداد، حمل، خدمات سیار</text>
+        </svg>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= ADVANTAGES ================= -->
+  <section id="advantages">
+    <div class="wrap">
+      <h2>چرا سفیر خودروچاره؟ <span style="color:var(--gold)">۶ مزیت اصلی</span></h2>
+      <p class="h2sub">وقتی به شبکهٔ سفیران خودروچاره می‌پیوندی، فقط یک اپ امداد نداری؛ یک بستهٔ کامل کاری داری:</p>
+
+      <div class="grid">
+        <div class="card"><span class="num">۱</span>
+          <div class="ic"><svg viewBox="0 0 24 24"><path d="M3 17h13v-7H3zM16 10h3l2 3v4h-5"/><circle cx="7" cy="17" r="1.8"/><circle cx="18" cy="17" r="1.8"/></svg></div>
+          <h3>بارهای خودروچاره</h3>
+          <p>تدفیق مستمر درخواست‌های امداد و حمل از شبکهٔ مشتریان سراسری؛ بارهای مرتبط با تخصص و موقعیت تو را در تابلوی درخواست‌ها ببین و در پذیرش رقابت کن.</p>
+          <span class="chip">درآمد مبتنی بر بار واقعی</span>
+        </div>
+
+        <div class="card"><span class="num">۲</span>
+          <div class="ic"><svg viewBox="0 0 24 24"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18.5h2"/></svg></div>
+          <h3>قابلیت‌های اپلیکیشن سفیر</h3>
+          <p>پذیرش، رسیدن و تکمیل مأموریت با یک لمس؛ GPS زنده و مسیریابی، گزارش درآمد و تاریخچهٔ مأموریت‌ها، مدیریت خدمات و پروفایل خودرو در یک اپ سبک.</p>
+          <span class="chip">همه‌چیز در موبایل</span>
+        </div>
+
+        <div class="card"><span class="num">۳</span>
+          <div class="ic"><svg viewBox="0 0 24 24"><path d="M14.5 6.5a4 4 0 0 0-5.4 5L3 17.6V21h3.4l6.1-6.1a4 4 0 0 0 5-5.4l-2.8 2.8-2.1-.7-.7-2.1z"/></svg></div>
+          <h3>لوازم یدکی با تضمین کف قیمت</h3>
+          <p>قطعات یدکی اورجینال و پرمصرف با قیمت کف بازار از تأمین‌کنندگان شبکه؛ با اطمینان به مشتری فاکتور بزن چون قیمت را با ما کنترل می‌کنی.</p>
+          <span class="chip">تضمین کف قیمت</span>
+        </div>
+
+        <div class="card"><span class="num">۴</span>
+          <div class="ic"><svg viewBox="0 0 24 24"><rect x="2.5" y="5" width="19" height="14" rx="2.5"/><circle cx="8" cy="11" r="2"/><path d="M13 9.5h6M13 12.5h5M5.5 15.5h13"/></svg></div>
+          <h3>کارت امدادگری</h3>
+          <p>هویت کاری رسمی سفیران: کارت امدادگری اختصاصی برای فعالیت قانونی و حرفه‌ای در سطح شهر، همراه با امتیازها و رتبه‌بندی خدمات.</p>
+          <span class="chip">اعتبار حرفه‌ای</span>
+        </div>
+
+        <div class="card"><span class="num">۵</span>
+          <div class="ic"><svg viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 4.5-3 8.2-7 10-4-1.8-7-5.5-7-10V6z"/><path d="M9 12l2 2 4-4.5"/></svg></div>
+          <h3>آرم و علائم با بالاترین اعتبار راهور کشوری</h3>
+          <p>تأمین و نصب آرم و علائم استاندارد خودروچاره با بالاترین سطح اعتبار راهور کشوری؛ نشان حرفه‌ای بودن روی یدک‌کش و خودروهای خدمات سیار.</p>
+          <span class="chip">استاندارد ملی</span>
+        </div>
+
+        <div class="card"><span class="num">۶</span>
+          <div class="ic"><svg viewBox="0 0 24 24"><path d="M12 3C8 6 5 6.5 4 6.5V13c0 5 3.6 7.4 8 8.5 4.4-1.1 8-3.5 8-8.5V6.5c-1 0-4-.5-8-3.5z"/><path d="M12 8v5M9.5 10.5h5"/></svg></div>
+          <h3>بیمه با قیمت پایین‌تر</h3>
+          <p>دسترسی سفیران به بیمهٔ بدنه/ثالثه و خدمات مرتبط با نرخ گروهی و کمتر از بازار؛ خرید اقساطی و پشتیبانی صدور و تمدید.</p>
+          <span class="chip">خرید گروهی ارزان‌تر</span>
+        </div>
+      </div>
+
+      <div class="more">
+        <span>+ آموزش و توان‌بخشی مهارت‌های امداد</span>
+        <span>+ پشتیبانی و داوری اختلاف</span>
+        <span>+ اولویت بار برای سفیران فعال</span>
+        <span>+ کیف پول و تسویهٔ شفاف</span>
+        <span>+ و قابلیت‌های دیگری که راه می‌آید…</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= STEPS ================= -->
+  <section id="steps">
+    <div class="wrap">
+      <h2>تنها سه قدم تا اولین بار</h2>
+      <p class="h2sub">مسیر ورود به شبکهٔ سفیران کاملاً آنلاین است؛ مستندات را بارگذاری کن و منتظر تأیید بمان.</p>
+      <div class="steps">
+        <div class="step">
+          <b>ثبت‌نام در سایت سفیران</b>
+          <p>در <a style="color:var(--gold2)" href="https://safir.khodrochare.ir/?ref=safiran">safir.khodrochare.ir</a> با نام، شمارهٔ موبایل ایران و کد ملی ثبت‌نام کن؛ پلاک و نوع خودرو و خدماتت را وارد کن.</p>
+        </div>
+        <div class="step">
+          <b>بارگذاری مدارک هویتی و خودرویی</b>
+          <p>تصویر کارت ملی (الزامی برای سفیران)، عکس پلاک و مدارک خودرو را در همان فرم آپلود کن. بررسی و صدور کارت امدادگری پس از تأیید انجام می‌شود.</p>
+        </div>
+        <div class="step">
+          <b>نصب اپ و شروع مأموریت</b>
+          <p>اپلیکیشن سفیران را نصب و با همان اکانت وارد شو؛ موقعیتت را روشن کن و درخواست‌های منتظر را در تابلوی بار ببین.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= DOWNLOAD ================= -->
+  <section id="download">
+    <div class="wrap split">
+      <div class="panel">
+        <h2>دانلود اپلیکیشن سفیران</h2>
+        <p class="muted">نسخهٔ اندروید را از یکی از مسیرهای زیر نصب کن. (اتصال فروشگاه‌ها پس از انتشار نهایی فعال می‌شود.)</p>
+        <div class="dl-list">
+          <!-- TODO: لینک واقعی انتشار (بازار/مایکت/APK سرور خودتان) را جایگزین کنید -->
+          <a class="dl" href="#download"><span>⬇ دانلود مستقیم APK (نسخهٔ پایدار)</span><span class="muted">به‌زودی</span></a>
+          <a class="dl" href="#download"><span>کافه بازار</span><span class="muted">به‌زودی</span></a>
+          <a class="dl" href="#download"><span>مایکت</span><span class="muted">به‌زودی</span></a>
+          <a class="dl" href="#download"><span>iOS</span><span class="muted">در دست توسعه</span></a>
+        </div>
+        <ul class="ticks">
+          <li>ورود با همان اکانت وب‌سایت سفیران — نشست جدا برای نقش امدادگر</li>
+          <li>حداقل اندروید ۸؛ حجم سبک، مصرف باتری بهینه در مأموریت</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <h2 style="font-size:20px">چک‌لیت ورود سفیر</h2>
+        <ul class="ticks">
+          <li>کد ملی و شمارهٔ موبایل به نام متقاضی</li>
+          <li>تصویر واضح کارت ملی (پشت و رو)</li>
+          <li>کارت خودرو / سند مالکیت یا مجوز بهره‌برداری یدک‌کش</li>
+          <li>حداقل یک خدمت فعال: حمل (توینگ)، تعمیر سیار، …</li>
+          <li> GPS گوشی روشن برای دریافت بار</li>
+        </ul>
+        <p class="muted" style="margin-top:14px">سؤال دربارهٔ احراز هویت و صدور کارت امدادگری؟ از فرم پشتیبانی داخل اپ یا لینک زیر اقدام کن.</p>
+        <a class="btn btn-ghost" style="margin-top:10px" href="https://safir.khodrochare.ir/?ref=safiran">ورود به پنل سفیران</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= FAQ ================= -->
+  <section id="faq">
+    <div class="wrap">
+      <h2>پرسش‌های پرتکرار</h2>
+      <div class="grid">
+        <div class="card">
+          <h3>آیا ثبت‌نام هزینه دارد؟</h3>
+          <p>ثبت‌نام اولیه رایگان است. هزینه‌های صدور کارت امدادگری و آرم/علائم (در صورت درخواست) پس از تأیید مدارک شفاف اعلام می‌شود.</p>
+        </div>
+        <div class="card">
+          <h3>چقدر طول می‌کشد تا فعال شوم؟</h3>
+          <p>پس از بارگذاری صحیح مدارک، بررسی و تأیید معمولاً تا یک روز کاری زمان می‌برد و نتیجه از طریق پیامک و اپ اعلام می‌شود.</p>
+        </div>
+        <div class="card">
+          <h3>درآمد و تسویه چگونه است؟</h3>
+          <p>مبلغ هر بار همان لحظهٔ ثبت درخواست بر اساس تعرفه و مسافت محاسبه و در گزارش مأموریت ثبت می‌شود؛ تسویه از طریق کیف پول سفیر انجام می‌گیرد.</p>
+        </div>
+        <div class="card">
+          <h3>آیا می‌توانم فقط بخشی از خدمات را بدهم؟</h3>
+          <p>بله؛ در پروفایل مشخص می‌کنی به چه خدماتی (حمل، تعمیر سیار و…) دسترسی داری و فقط بارهای مرتبط به تو نمایش داده می‌شود.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= FINAL CTA ================= -->
+  <section>
+    <div class="wrap">
+      <div class="final">
+        <div>
+          <h2>امشب ثبت‌نام کن، فردا بار بگیر.</h2>
+          <p class="muted" style="margin:4px 0 0">ثبت‌نام و آپلود مدارک در سایت سفیران کمتر از ده دقیقه زمان می‌برد.</p>
+        </div>
+        <div class="cta-row">
+          <a class="btn btn-gold" href="https://safir.khodrochare.ir/?ref=safiran">شروع ثبت‌نام سفیر</a>
+          <a class="btn btn-ghost" href="#download">دانلود اپلیکیشن</a>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>© خودروچاره — شبکهٔ امداد، حمل و خدمات سیار خودرو · khodrochare.ir</span>
+    <span>پشتیبانی سفیران: ۰۲۱-XXXXXXXX (قلمرو تستی — جایگزین کنید) · api.khodrochare.ir</span>
+  </div>
+</footer>
+
+<!-- نوار CTA موبایل -->
+<div class="mobile-cta">
+  <a class="btn btn-ghost" href="#download">دانلود اپ</a>
+  <a class="btn btn-gold" href="https://safir.khodrochare.ir/?ref=safiran">ثبت‌نام سفیر</a>
+</div>
+
+</body>
+</html>
