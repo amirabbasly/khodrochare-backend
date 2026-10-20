@@ -242,3 +242,6 @@ Health: `GET /health/live` و `GET /health/ready` بیرون از `/api/v1` هس
 
 
 قرارداد جدید نوع حمل، شرایط ویژه، snapshot تعرفه و ورود با کوکی در [راهنمای تعرفه و نشست](TARIFFS-AND-SESSIONS.md) آمده است.
+
+
+مسیرهای جدید جست‌وجوی آدرس، کاتالوگ خودرو، برآورد حمل، قطعات و پرداخت: [راهنمای آدرس و پرداخت](ADDRESSES-CATALOG-PAYMENTS.md).

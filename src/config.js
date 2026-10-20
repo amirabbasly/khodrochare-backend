@@ -10,6 +10,7 @@ const config = z.object({
   TOW_PER_KM_TOMAN: z.coerce.number().int().positive().default(20000),
   PRICING_VERSION: z.string().default('v1'),
   DISTANCE_MODE: z.enum(['road', 'geodesic']).default('road'),
+  PHOTON_URL: z.string().url().default('https://photon.komoot.io'),
   OSRM_URL: z.string().url().default('https://router.project-osrm.org'),
   LOCATION_MAX_AGE_SECONDS: z.coerce.number().int().min(10).max(600).default(120),
   UPLOAD_DIR: z.string().default('./uploads'),

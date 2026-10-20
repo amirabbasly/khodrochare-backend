@@ -1,7 +1,11 @@
 const { randomBytes } = require('node:crypto');
 const { hash, HttpError } = require('./domain');
 const { quote } = require('./pricing');
+const { createCatalog } = require('./catalog');
+const { createGeocoder } = require('./geocoding');
 function createServices({ prisma, redis, config, io }) {
+  const catalog = createCatalog(prisma);
+  const geocoder = createGeocoder({ redis, config: config || {} });
   const safeUser = u => { const { passwordHash, ...safe } = u; return safe; };
   async function session(user) {
     const token = randomBytes(32).toString('hex');
@@ -74,14 +78,31 @@ function createServices({ prisma, redis, config, io }) {
     }
     return { recordedAt };
   }
+  async function prepareTowing(input, at) {
+    const model = await catalog.resolve(input.vehicleName, input.vehicleModelId);
+    const [origin, destination] = await Promise.all([geocoder.resolve(input.originPlaceId, input.origin), geocoder.resolve(input.destinationPlaceId, input.destination)]);
+    const canonical = { ...input, vehicleName: model?.name || input.vehicleName, origin, destination };
+    const route = await distance(origin, destination, true);
+    const pricing = quote({ ...canonical, service: 'TOWING', distanceMeters: route.meters, at, tariff: model?.group || null, groupOverride: model?.groupId || 'UNLISTED' });
+    return { input: canonical, model, route, pricing };
+  }
+  async function estimateTowing(input) {
+    const prepared = await prepareTowing(input, new Date());
+    if (prepared.route.meters < 1) throw new HttpError(400, 'Origin and destination must differ');
+    return { ...prepared.pricing, distanceMeters: prepared.route.meters, distanceMethod: prepared.route.method, vehicleName: prepared.input.vehicleName, originAddress: prepared.input.origin.label, destinationAddress: prepared.input.destination.label };
+  }
   async function createRequest(user, input, service) {
-    const route = service === 'TOWING' ? await distance(input.origin, input.destination, true) : null;
-    if (route && route.meters < 1) throw new HttpError(400, 'Origin and destination must differ');
     const now = new Date();
-    const pricing = quote({ ...input, service, distanceMeters: route?.meters, at: now });
+    const prepared = service === 'TOWING' ? await prepareTowing(input, now) : null;
+    const route = prepared?.route;
+    if (prepared) input = prepared.input;
+    if (route && route.meters < 1) throw new HttpError(400, 'Origin and destination must differ');
+    const pricing = prepared?.pricing || quote({ ...input, service, at: now });
     return prisma.$transaction(async tx => {
       const request = await tx.assistanceRequest.create({ data: {
         customerId: user.id, service, vehicleName: input.vehicleName, vehiclePlate: input.vehiclePlate,
+        vehicleModelId: prepared?.model?.id || undefined,
+        originAddress: prepared?.input.origin.label, destinationAddress: prepared?.input.destination.label,
         originLat: input.origin.latitude, originLng: input.origin.longitude,
         destinationLat: input.destination?.latitude, destinationLng: input.destination?.longitude,
         problem: input.problem, distanceMeters: route?.meters, distanceMethod: route?.method,
@@ -93,6 +114,6 @@ function createServices({ prisma, redis, config, io }) {
       return request;
     });
   }
-  return { safeUser, session, authenticate, authenticateSession, claimDocument, distance, ownedRequest, tracking, updateLocation, createRequest };
+  return { safeUser, session, authenticate, authenticateSession, claimDocument, distance, ownedRequest, tracking, updateLocation, createRequest, estimateTowing };
 }
 module.exports = { createServices };

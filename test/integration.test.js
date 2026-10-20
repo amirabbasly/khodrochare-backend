@@ -10,6 +10,7 @@ test('real PostGIS / Redis / HTTP / Socket.IO lifecycle', { skip: !enabled, time
   const { io } = require('socket.io-client');
   const { PrismaClient } = require('@prisma/client');
   const prisma = new PrismaClient();
+  const redis = new (require('ioredis'))(process.env.REDIS_URL);
   const child = spawn(process.execPath, ['src/server.js'], { env: { ...process.env, PORT: '4199', DISTANCE_MODE: 'geodesic' }, stdio: ['ignore', 'pipe', 'pipe'] });
   let output = '';
   child.stdout.on('data', b => { output += b; });
@@ -62,7 +63,14 @@ test('real PostGIS / Redis / HTTP / Socket.IO lifecycle', { skip: !enabled, time
     const repair = await call('/requests/repair', { token: customer.token, method: 'POST', body: repairInput, status: 201 });
     assert.equal(repair.service, 'REPAIR');
     assert.ok(repair.createdAt);
-    const towInput = { ...repairInput, destination: { latitude: 35.8, longitude: 51.5 } }; delete towInput.problem;
+    // Cached provider selections keep this isolated lifecycle independent of public geocoding.
+    const originPlaceId = 'a'.repeat(64), destinationPlaceId = 'b'.repeat(64);
+    for (const [id, latitude, longitude, street] of [[originPlaceId, 35.7, 51.4, 'ولیعصر'], [destinationPlaceId, 35.8, 51.5, 'آزادی']]) {
+      await redis.set(`place:${id}`, JSON.stringify({ id, latitude, longitude, city: 'تهران', street, label: `تهران، ${street}` }), 'EX', 3600);
+    }
+    const models = await call('/vehicle-models?q=' + encodeURIComponent('پژو ۲۰۶'), { token: customer.token });
+    assert.ok(models.length > 0);
+    const towInput = { ...repairInput, vehicleModelId: models[0].id, originPlaceId, destinationPlaceId, destination: { latitude: 35.8, longitude: 51.5 } }; delete towInput.problem;
     const tow = await call('/requests/towing', { token: customer.token, method: 'POST', body: towInput, status: 201 });
     assert.ok(tow.distanceMeters > 10000);
     assert.equal(tow.priceToman, require("../src/pricing").quote({ service: "TOWING", vehicleName: tow.vehicleName, distanceMeters: tow.distanceMeters, at: new Date(tow.createdAt) }).priceToman);
@@ -87,7 +95,23 @@ test('real PostGIS / Redis / HTTP / Socket.IO lifecycle', { skip: !enabled, time
     assert.equal(event.requestId, repair.id);
     assert.equal((await driverReceived)[0].distanceToOriginMeters, event.distanceToOriginMeters);
     await call(`/requests/${repair.id}/status`, { token: customer.token, method: 'PATCH', body: { status: 'COMPLETED' }, status: 409 });
-    for (const status of ['ARRIVED', 'COMPLETED']) await call(`/requests/${repair.id}/status`, { token: winner.token, method: 'PATCH', body: { status } });
+    await call(`/requests/${repair.id}/status`, { token: winner.token, method: 'PATCH', body: { status: 'ARRIVED' } });
+    await call(`/requests/${repair.id}/parts-quote`, { token: loser.token, method: 'POST', body: { amountToman: 200000 }, status: 404 });
+    const inspected = await call(`/requests/${repair.id}/parts-quote`, { token: winner.token, method: 'POST', body: { amountToman: 200000 } });
+    await call(`/requests/${repair.id}/payment`, { token: customer.token, method: 'POST', status: 409 });
+    await call(`/requests/${repair.id}/parts-quote/approve`, { token: customer.token, method: 'POST', body: { version: inspected.partsQuoteVersion } });
+    const payment = await call(`/requests/${repair.id}/payment`, { token: customer.token, method: 'POST', status: 201 });
+    assert.equal(payment.amountToman, 1000000);
+    assert.equal(payment.commissionToman, 300000);
+    assert.equal(payment.driverShareToman, 700000);
+    const reported = await call(`/requests/${repair.id}/payment/report`, { token: customer.token, method: 'POST', body: { bankReference: 'TEST-' + Date.now(), transferredAt: new Date().toISOString() } });
+    assert.equal(reported.status, 'SUBMITTED');
+    assert.equal(await prisma.driverEarning.count(), 0);
+    await call(`/requests/${repair.id}/status`, { token: winner.token, method: 'PATCH', body: { status: 'COMPLETED' } });
+    await require('../src/payments').createPayments(prisma).review(payment.id, true, 'integration-test', 'Verified against isolated test transfer');
+    const earnings = await call('/drivers/earnings', { token: winner.token });
+    assert.equal(earnings.totalToman, 700000);
+    assert.equal(await prisma.driverEarning.count(), 1);
     await call(`/requests/${repair.id}/tracking`, { token: customer.token, status: 409 });
     await call('/auth/logout', { token: customer.token, method: 'POST', status: 204 });
     await call('/me', { token: customer.token, status: 401 });
@@ -96,6 +120,7 @@ test('real PostGIS / Redis / HTTP / Socket.IO lifecycle', { skip: !enabled, time
     for (const socket of sockets) socket.disconnect();
     child.kill('SIGTERM');
     await Promise.race([once(child, 'exit'), delay(10000)]);
+    await redis.quit();
     await prisma.$disconnect();
   }
 });

@@ -27,14 +27,16 @@ function vehicleGroup(vehicleName) {
     .sort((a, b) => b.model.length - a.model.length);
   return candidates[0]?.group || 'UNLISTED';
 }
-function quote({ service, vehicleName, distanceMeters = 0, transportKind = 'NISSAN', heavyTraffic = false, rainOrSnow = false, hasExtraLoad = false, at = new Date() }) {
+function quote({ service, vehicleName, distanceMeters = 0, transportKind = 'NISSAN', heavyTraffic = false, rainOrSnow = false, hasExtraLoad = false, tariff, groupOverride, at = new Date() }) {
   if (service === 'REPAIR') return {
     priceToman: 800000, pricingVersion: VERSION,
     pricingBreakdown: { version: VERSION, service, baseToman: 800000, totalToman: 800000, partsIncluded: false, partsPricing: 'AFTER_INSPECTION', requiresAgreement: false },
   };
   if (!Number.isFinite(distanceMeters) || distanceMeters <= 0) throw new Error('Invalid tariff distance');
-  const group = vehicleGroup(vehicleName);
-  const rate = TARIFFS[group]?.[transportKind];
+  const group = groupOverride || vehicleGroup(vehicleName);
+  const pair = tariff ? (transportKind === 'NISSAN' ? [tariff.nissanBaseToman, tariff.nissanPerKmToman] : [tariff.flatbedBaseToman, tariff.flatbedPerKmToman]) : null;
+  const rate = tariff === undefined ? TARIFFS[group]?.[transportKind] : pair?.every(Number.isInteger) ? pair : null;
+  const version = tariff?.version || VERSION;
   const hour = Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Tehran', hour: '2-digit', hourCycle: 'h23' }).format(at));
   const night = hour < 6;
   const surchargePercent = (night ? 20 : 0) + (heavyTraffic ? 20 : 0) + (rainOrSnow ? 20 : 0);
@@ -45,8 +47,8 @@ function quote({ service, vehicleName, distanceMeters = 0, transportKind = 'NISS
   const requiresAgreement = !rate || hasExtraLoad;
   if (knownTotalToman !== null && (!Number.isSafeInteger(knownTotalToman) || knownTotalToman > 2147483647)) throw new Error('Price exceeds supported range');
   return {
-    priceToman: requiresAgreement ? null : knownTotalToman, pricingVersion: VERSION,
-    pricingBreakdown: { version: VERSION, service, vehicleGroup: group, transportKind, distanceMeters, baseToman: rate?.[0] ?? null, perKmToman: rate?.[1] ?? null, distanceChargeToman, subtotalToman, night, heavyTraffic, rainOrSnow, hasExtraLoad, nightSurchargePercent: night ? 20 : 0, trafficSurchargePercent: heavyTraffic ? 20 : 0, weatherSurchargePercent: rainOrSnow ? 20 : 0, surchargePercent, surchargeToman, knownTotalToman, totalToman: requiresAgreement ? null : knownTotalToman, requiresAgreement, agreementReason: !rate ? 'UNPRICED_VEHICLE_OR_TRANSPORT' : hasExtraLoad ? 'EXTRA_LOAD' : null },
+    priceToman: requiresAgreement ? null : knownTotalToman, pricingVersion: version,
+    pricingBreakdown: { version, service, vehicleGroup: group, transportKind, distanceMeters, baseToman: rate?.[0] ?? null, perKmToman: rate?.[1] ?? null, distanceChargeToman, subtotalToman, night, heavyTraffic, rainOrSnow, hasExtraLoad, nightSurchargePercent: night ? 20 : 0, trafficSurchargePercent: heavyTraffic ? 20 : 0, weatherSurchargePercent: rainOrSnow ? 20 : 0, surchargePercent, surchargeToman, knownTotalToman, totalToman: requiresAgreement ? null : knownTotalToman, requiresAgreement, agreementReason: !rate ? 'UNPRICED_VEHICLE_OR_TRANSPORT' : hasExtraLoad ? 'EXTRA_LOAD' : null },
   };
 }
-module.exports = { quote, vehicleGroup, TARIFFS, VERSION };
+module.exports = { quote, vehicleGroup, TARIFFS, VERSION, MODELS, normalize };

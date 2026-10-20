@@ -41,6 +41,7 @@ model User {
   requests AssistanceRequest[] @relation("CustomerRequests")
   assignments AssistanceRequest[] @relation("DriverRequests")
   location DriverLocation?
+  earnings DriverEarning[]
   createdAt DateTime @default(now())
   @@unique([role, phone])
   @@unique([role, nationalId])
@@ -84,6 +85,15 @@ model AssistanceRequest {
   status RequestStatus @default(PENDING)
   vehicleName String
   vehiclePlate String
+  vehicleModelId String?
+  vehicleModel VehicleModel? @relation(fields: [vehicleModelId], references: [id])
+  originAddress String?
+  destinationAddress String?
+  partsQuoteToman Int?
+  partsQuoteVersion Int @default(0)
+  partsApprovedToman Int?
+  partsApprovedAt DateTime?
+  payment Payment?
   problem String?
   originLat Float
   originLng Float
@@ -102,6 +112,69 @@ model AssistanceRequest {
   @@index([customerId, createdAt])
   @@index([driverId, status])
   @@index([status, service])
+}
+model TariffGroup {
+  id String @id
+  title String
+  nissanBaseToman Int?
+  nissanPerKmToman Int?
+  flatbedBaseToman Int?
+  flatbedPerKmToman Int?
+  version String
+  models VehicleModel[]
+}
+model VehicleModel {
+  id String @id
+  name String
+  normalizedName String @unique
+  aliases String[]
+  searchText String
+  groupId String
+  group TariffGroup @relation(fields: [groupId], references: [id])
+  requests AssistanceRequest[]
+  @@index([groupId])
+}
+model Payment {
+  id String @id @default(uuid())
+  requestId String @unique
+  request AssistanceRequest @relation(fields: [requestId], references: [id])
+  status String @default("AWAITING_TRANSFER")
+  serviceToman Int
+  partsToman Int
+  amountToman Int
+  commissionPercent Int
+  commissionToman Int
+  driverShareToman Int
+  cardNumber String
+  accountName String
+  createdAt DateTime @default(now())
+  verifiedAt DateTime?
+  attempts PaymentAttempt[]
+  earning DriverEarning?
+}
+model PaymentAttempt {
+  id String @id @default(uuid())
+  paymentId String
+  payment Payment @relation(fields: [paymentId], references: [id])
+  bankReference String @unique
+  transferredAt DateTime
+  status String @default("SUBMITTED")
+  createdAt DateTime @default(now())
+  reviewedAt DateTime?
+  reviewedBy String?
+  reviewNote String?
+  @@index([paymentId, createdAt])
+}
+model DriverEarning {
+  id String @id @default(uuid())
+  paymentId String @unique
+  payment Payment @relation(fields: [paymentId], references: [id])
+  driverId String
+  driver User @relation(fields: [driverId], references: [id])
+  amountToman Int
+  commissionToman Int
+  createdAt DateTime @default(now())
+  @@index([driverId, createdAt])
 }
 model DriverLocation {
   driverId String @id

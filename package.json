@@ -8,7 +8,7 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
-    "test": "node --test test/domain.test.js test/services.test.js test/http.test.js test/realtime.test.js test/pricing.test.js test/session-cookies.test.js",
+    "test": "node --test test/domain.test.js test/services.test.js test/http.test.js test/realtime.test.js test/pricing.test.js test/session-cookies.test.js test/catalog-geocoding.test.js test/payments.test.js",
     "test:integration": "node --test test/integration.test.js",
     "prisma:generate": "prisma generate",
     "prisma:validate": "prisma validate",

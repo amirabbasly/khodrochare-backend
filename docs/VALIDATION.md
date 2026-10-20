@@ -24,3 +24,6 @@
 - [Prisma و queryهای PostGIS](https://docs.prisma.io/docs/orm/prisma-client/using-raw-sql/safeql)
 - [Socket.IO middleware](https://socket.io/docs/v4/middlewares)
 - [Socket.IO rooms](https://socket.io/docs/v4/rooms/)
+
+
+گزارش نسخه جدید آدرس، کاتالوگ و پرداخت و محدودیت‌های اجرای واقعی در [ADDRESSES-CATALOG-PAYMENTS.md](ADDRESSES-CATALOG-PAYMENTS.md) آمده است؛ آمار بالای این سند مربوط به نسخه اولیه است.
