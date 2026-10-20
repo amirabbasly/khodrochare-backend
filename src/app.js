@@ -7,16 +7,27 @@ const fs = require('node:fs/promises');
 const { randomUUID, randomBytes } = require('node:crypto');
 const { z } = require('zod');
 const d = require('./domain');
+const { cookieToken, setSessionCookie, clearSessionCookie } = require('./session-cookies');
 
 function createApp({ prisma, redis, config, io, services: s }) {
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', config.TRUST_PROXY);
   app.use(helmet());
-  app.use(cors({ origin: config.origins, credentials: false }));
+  app.use(cors({ origin: config.origins, credentials: true, exposedHeaders: ['X-Session-Expires-At'] }));
   app.use(express.json({ limit: '256kb' }));
   const auth = async (req, res, next) => {
-    try { req.token = req.headers.authorization?.replace(/^Bearer /, ''); req.user = await s.authenticate(req.token); next(); } catch (e) { next(e); }
+    try {
+      req.token = req.headers.authorization?.replace(/^Bearer /, '') || cookieToken(req.headers.cookie, req.get('X-App-Role'));
+      if (s.authenticateSession) {
+        const session = await s.authenticateSession(req.token);
+        req.user = session.user;
+        res.set('X-Session-Expires-At', session.expiresAt.toISOString());
+        // Refresh persistent cookies only; explicit logout always removes them.
+        if (cookieToken(req.headers.cookie, req.user.role)) setSessionCookie(res, session, config, req.get("X-Session-Persistence") !== "browser");
+      } else req.user = await s.authenticate(req.token);
+      next();
+    } catch (e) { next(e); }
   };
   const role = value => (req, res, next) => req.user.role === value ? next() : next(new d.HttpError(403, `${value} role required`));
   const limit = (name, max, seconds) => async (req, res, next) => {
@@ -74,19 +85,24 @@ function createApp({ prisma, redis, config, io, services: s }) {
         }
         return user;
       });
-      res.status(201).json(await s.session(user));
+      const session = await s.session(user);
+      setSessionCookie(res, session, config);
+      res.status(201).json(session);
     });
     app.post(`/api/v1/auth/${slug}/login`, limit('login', 10, 900), async (req, res) => {
-      const input = z.object({ phone: d.phone, password: z.string().min(1).max(128) }).strict().parse(req.body);
+      const input = z.object({ phone: d.phone, password: z.string().min(1).max(128), remember: z.boolean().default(true) }).strict().parse(req.body);
       const user = await prisma.user.findUnique({ where: { role_phone: { role: userRole, phone: input.phone } } });
       const fallback = '00000000000000000000000000000000:' + '00'.repeat(64);
       const correct = await d.verifyPassword(input.password, user?.passwordHash || fallback);
       if (!user || !correct) throw new d.HttpError(401, 'Invalid phone or password');
-      res.json(await s.session(user));
+      const session = await s.session(user);
+      setSessionCookie(res, session, config, input.remember);
+      res.json(session);
     });
   }
   app.post('/api/v1/auth/logout', auth, async (req, res) => {
     await prisma.session.deleteMany({ where: { tokenHash: d.hash(req.token) } });
+    clearSessionCookie(res, req.user.role, config);
     io.in(`user:${req.user.id}`).disconnectSockets(true);
     res.status(204).end();
   });
@@ -121,7 +137,7 @@ function createApp({ prisma, redis, config, io, services: s }) {
     res.json(await prisma.assistanceRequest.findMany({ where: req.user.role === 'CUSTOMER' ? { customerId: req.user.id } : { driverId: req.user.id }, orderBy: { createdAt: 'desc' }, take: 50, skip: (page - 1) * 50 }));
   });
   app.get('/api/v1/drivers/requests/available', auth, role('DRIVER'), async (req, res) => {
-    const requests = await prisma.assistanceRequest.findMany({ where: { status: 'PENDING', service: { in: req.user.services } }, select: { id: true, service: true, vehicleName: true, originLat: true, originLng: true, destinationLat: true, destinationLng: true, distanceMeters: true, priceToman: true, createdAt: true }, orderBy: { createdAt: 'desc' }, take: 50 });
+    const requests = await prisma.assistanceRequest.findMany({ where: { status: 'PENDING', service: { in: req.user.services } }, select: { id: true, service: true, vehicleName: true, originLat: true, originLng: true, destinationLat: true, destinationLng: true, distanceMeters: true, priceToman: true, pricingBreakdown: true, createdAt: true }, orderBy: { createdAt: 'desc' }, take: 50 });
     res.json(requests);
   });
   app.get('/api/v1/requests/:id', auth, async (req, res) => res.json(await s.ownedRequest(req.params.id, req.user)));

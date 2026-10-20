@@ -36,3 +36,17 @@ test('unavailable road routing fails explicitly instead of charging straight-lin
     await assert.rejects(s.distance({ longitude: 51, latitude: 35 }, { longitude: 52, latitude: 36 }, true), { status: 503 });
   } finally { global.fetch = oldFetch; }
 });
+
+test('request creation persists the repair entry fee, exclusions and a durable event together', async () => {
+  let saved;
+  let outbox = false;
+  const tx = { assistanceRequest: { create: async ({ data }) => { saved = data; return { id: 'request', ...data }; } }, $executeRaw: async () => 1, outbox: { create: async () => { outbox = true; } } };
+  const prisma = { $transaction: async callback => callback(tx) };
+  const services = createServices({ prisma });
+  await services.createRequest({ id: 'customer' }, { vehicleName: 'هر خودرو', vehiclePlate: '12ب34567', origin: { latitude: 35, longitude: 51 }, problem: 'روشن نمیشود' }, 'REPAIR');
+  assert.equal(saved.priceToman, 800000);
+  assert.equal(saved.pricingBreakdown.partsIncluded, false);
+  assert.equal(saved.pricingVersion, 'reference-table-v1');
+  assert.ok(saved.createdAt instanceof Date);
+  assert.equal(outbox, true);
+});

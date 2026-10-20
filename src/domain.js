@@ -17,7 +17,7 @@ const customerRegistration = z.object({ ...common, identityDocument: documentRef
 const driverRegistration = z.object({ ...common, vehiclePlate: vehicle.shape.plate, vehicleType: z.string().trim().min(2).max(100), services: z.array(z.enum(services)).min(1).max(5).transform(v => [...new Set(v)]), identityDocument: documentRef }).strict();
 const point = z.object({ latitude: z.number().min(-90).max(90), longitude: z.number().min(-180).max(180) }).strict();
 const baseRequest = { vehicleName: vehicle.shape.name, vehiclePlate: vehicle.shape.plate, origin: point };
-const towing = z.object({ ...baseRequest, destination: point }).strict();
+const towing = z.object({ ...baseRequest, destination: point, transportKind: z.enum(['NISSAN', 'FLATBED']).default('NISSAN'), heavyTraffic: z.boolean().default(false), rainOrSnow: z.boolean().default(false), hasExtraLoad: z.boolean().default(false) }).strict();
 const repair = z.object({ ...baseRequest, problem: z.string().trim().min(3).max(2000) }).strict();
 const location = point.extend({ recordedAt: z.iso.datetime() }).strict();
 const hash = value => crypto.createHash('sha256').update(value).digest('hex');

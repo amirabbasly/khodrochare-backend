@@ -1,5 +1,6 @@
 const { randomBytes } = require('node:crypto');
-const { hash, HttpError, priceFor } = require('./domain');
+const { hash, HttpError } = require('./domain');
+const { quote } = require('./pricing');
 function createServices({ prisma, redis, config, io }) {
   const safeUser = u => { const { passwordHash, ...safe } = u; return safe; };
   async function session(user) {
@@ -8,12 +9,19 @@ function createServices({ prisma, redis, config, io }) {
     await prisma.session.create({ data: { tokenHash: hash(token), userId: user.id, expiresAt } });
     return { token, expiresAt, user: safeUser(user) };
   }
-  async function authenticate(token) {
+  async function authenticateSession(token) {
     if (typeof token !== 'string' || !/^[a-f0-9]{64}$/.test(token)) throw new HttpError(401, 'Authentication required');
     const found = await prisma.session.findUnique({ where: { tokenHash: hash(token) }, include: { user: true } });
     if (!found || found.expiresAt <= new Date()) throw new HttpError(401, 'Session expired');
-    return found.user;
+    let expiresAt = found.expiresAt;
+    const lifetime = config?.SESSION_DAYS * 86400000;
+    if (lifetime && expiresAt.getTime() - Date.now() < lifetime / 2) {
+      expiresAt = new Date(Date.now() + lifetime);
+      await prisma.session.update({ where: { tokenHash: hash(token) }, data: { expiresAt } });
+    }
+    return { user: found.user, expiresAt, token };
   }
+  async function authenticate(token) { return (await authenticateSession(token)).user; }
   async function claimDocument(tx, ref, userId, vehicleId) {
     const result = await tx.document.updateMany({ where: { id: ref.id, ownerId: null, uploadTokenHash: hash(ref.token), createdAt: { gt: new Date(Date.now() - 86400000) } }, data: { ownerId: userId, vehicleId, uploadTokenHash: null } });
     if (result.count !== 1) throw new HttpError(400, 'Invalid, expired or already used document');
@@ -69,14 +77,15 @@ function createServices({ prisma, redis, config, io }) {
   async function createRequest(user, input, service) {
     const route = service === 'TOWING' ? await distance(input.origin, input.destination, true) : null;
     if (route && route.meters < 1) throw new HttpError(400, 'Origin and destination must differ');
+    const now = new Date();
+    const pricing = quote({ ...input, service, distanceMeters: route?.meters, at: now });
     return prisma.$transaction(async tx => {
       const request = await tx.assistanceRequest.create({ data: {
         customerId: user.id, service, vehicleName: input.vehicleName, vehiclePlate: input.vehiclePlate,
         originLat: input.origin.latitude, originLng: input.origin.longitude,
         destinationLat: input.destination?.latitude, destinationLng: input.destination?.longitude,
         problem: input.problem, distanceMeters: route?.meters, distanceMethod: route?.method,
-        priceToman: route ? priceFor(route.meters, config.TOW_BASE_TOMAN, config.TOW_PER_KM_TOMAN) : null,
-        pricingVersion: route ? config.PRICING_VERSION : null,
+        ...pricing, createdAt: now,
       } });
       await tx.$executeRaw`UPDATE "AssistanceRequest" SET origin=ST_SetSRID(ST_MakePoint(${input.origin.longitude},${input.origin.latitude}),4326)::geography WHERE id=${request.id}`;
       if (input.destination) await tx.$executeRaw`UPDATE "AssistanceRequest" SET destination=ST_SetSRID(ST_MakePoint(${input.destination.longitude},${input.destination.latitude}),4326)::geography WHERE id=${request.id}`;
@@ -84,6 +93,6 @@ function createServices({ prisma, redis, config, io }) {
       return request;
     });
   }
-  return { safeUser, session, authenticate, claimDocument, distance, ownedRequest, tracking, updateLocation, createRequest };
+  return { safeUser, session, authenticate, authenticateSession, claimDocument, distance, ownedRequest, tracking, updateLocation, createRequest };
 }
 module.exports = { createServices };

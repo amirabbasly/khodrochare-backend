@@ -1,8 +1,9 @@
 const { location, HttpError } = require('./domain');
+const { cookieToken } = require('./session-cookies');
 function attachRealtime(io, services, redis) {
   io.use(async (socket, next) => {
     try {
-      socket.data.token = socket.handshake.auth.token;
+      socket.data.token = socket.handshake.auth.token || cookieToken(socket.handshake.headers.cookie, socket.handshake.auth.role);
       socket.data.user = await services.authenticate(socket.data.token);
       next();
     } catch { next(new Error('Authentication required')); }

@@ -13,7 +13,7 @@ const jobsRedis = new Redis(config.REDIS_URL, { maxRetriesPerRequest: null });
 for (const client of [redis, jobsRedis]) client.on('error', err => console.error('Redis:', err.message));
 let app;
 const server = http.createServer((req, res) => app(req, res));
-const io = new Server(server, { cors: { origin: config.origins }, maxHttpBufferSize: 16384, allowRequest: (req, done) => done(null, !req.headers.origin || config.origins.includes(req.headers.origin)) });
+const io = new Server(server, { cors: { origin: config.origins, credentials: true }, maxHttpBufferSize: 16384, allowRequest: (req, done) => done(null, !req.headers.origin || config.origins.includes(req.headers.origin)) });
 const services = createServices({ prisma, redis, config, io });
 app = createApp({ prisma, redis, config, io, services });
 

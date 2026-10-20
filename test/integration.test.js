@@ -65,7 +65,7 @@ test('real PostGIS / Redis / HTTP / Socket.IO lifecycle', { skip: !enabled, time
     const towInput = { ...repairInput, destination: { latitude: 35.8, longitude: 51.5 } }; delete towInput.problem;
     const tow = await call('/requests/towing', { token: customer.token, method: 'POST', body: towInput, status: 201 });
     assert.ok(tow.distanceMeters > 10000);
-    assert.equal(tow.priceToman, 200000 + Math.ceil(tow.distanceMeters / 1000) * 20000);
+    assert.equal(tow.priceToman, require("../src/pricing").quote({ service: "TOWING", vehicleName: tow.vehicleName, distanceMeters: tow.distanceMeters, at: new Date(tow.createdAt) }).priceToman);
     await call(`/requests/${repair.id}/accept`, { token: driver.token, method: 'POST', status: 409 });
     const gps = { latitude: 35.71, longitude: 51.41, recordedAt: new Date().toISOString() };
     for (const actor of [driver, driver2]) await call('/drivers/location', { token: actor.token, method: 'PUT', body: gps });

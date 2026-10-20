@@ -5,7 +5,7 @@ const config = z.object({
   PORT: z.coerce.number().int().min(1).max(65535).default(4000),
   DATABASE_URL: z.string().min(1), REDIS_URL: z.string().min(1),
   CORS_ORIGINS: z.string().min(1),
-  SESSION_DAYS: z.coerce.number().int().min(1).max(90).default(7),
+  SESSION_DAYS: z.coerce.number().int().min(1).max(365).default(90),
   TOW_BASE_TOMAN: z.coerce.number().int().nonnegative().default(200000),
   TOW_PER_KM_TOMAN: z.coerce.number().int().positive().default(20000),
   PRICING_VERSION: z.string().default('v1'),

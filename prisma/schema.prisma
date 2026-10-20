@@ -95,6 +95,7 @@ model AssistanceRequest {
   distanceMethod String?
   priceToman Int?
   pricingVersion String?
+  pricingBreakdown Json?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   acceptedAt DateTime?
