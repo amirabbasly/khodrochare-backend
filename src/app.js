@@ -193,6 +193,19 @@ function createApp({ prisma, redis, config, io, services: s }) {
       res.status(201).json(await s.createRequest(req.user, schema.parse(req.body), service));
     });
   }
+  app.post('/api/v1/requests/:id/commission-confirm', auth, role('DRIVER'), async (req, res) => {
+    z.object({ confirmed: z.literal(true) }).strict().parse(req.body);
+    res.json(await prisma.$transaction(async tx => {
+      await lockRequest(tx, req.params.id);
+      const request = await tx.assistanceRequest.findUnique({ where: { id: req.params.id } });
+      if (!request || request.driverId !== req.user.id) throw new d.HttpError(404, 'Request not found');
+      if (request.service !== 'REPAIR' || request.status !== 'ARRIVED' || !request.operationsStartedAt || request.partsApprovedToman == null) throw new d.HttpError(409, 'Operations must start before commission confirmation');
+      if (request.driverCommissionConfirmedAt) return request;
+      const result = await tx.assistanceRequest.update({ where: { id: request.id }, data: { driverCommissionConfirmedAt: new Date() } });
+      await tx.outbox.create({ data: { requestId: request.id } });
+      return result;
+    }));
+  });
   app.post('/api/v1/requests/:id/operations/start', auth, role('DRIVER'), async (req, res) => {
     res.json(await prisma.$transaction(async tx => {
       await lockRequest(tx, req.params.id);
@@ -243,7 +256,7 @@ function createApp({ prisma, redis, config, io, services: s }) {
       await lockRequest(tx, request.id);
       if (status === 'COMPLETED' && request.service === 'REPAIR') {
         const fresh = await tx.assistanceRequest.findUnique({ where: { id: request.id }, include: { payment: true } });
-        if (!fresh.operationsStartedAt || fresh.partsApprovedToman == null || fresh.payment?.status !== 'VERIFIED') throw new d.HttpError(409, 'Operations and verified payment required before completion');
+        if (!fresh.operationsStartedAt || fresh.partsApprovedToman == null || !fresh.driverCommissionConfirmedAt) throw new d.HttpError(409, 'Operations and driver commission confirmation required before completion');
       }
       if (status === 'CANCELLED') {
         const payment = await tx.payment.findUnique({ where: { requestId: request.id } });

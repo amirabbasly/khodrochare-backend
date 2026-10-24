@@ -94,6 +94,7 @@ model AssistanceRequest {
   partsQuoteToman Int?
   partsQuoteVersion Int @default(0)
   partsApprovedToman Int?
+  driverCommissionConfirmedAt DateTime?
   operationsStartedAt DateTime?
   partsApprovedAt DateTime?
   payment Payment?

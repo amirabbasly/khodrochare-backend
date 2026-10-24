@@ -109,10 +109,14 @@ test('real PostGIS / Redis / HTTP / Socket.IO lifecycle', { skip: !enabled, time
     assert.equal(await prisma.driverEarning.count(), 0);
     await call(`/requests/${repair.id}/operations/start`, { token: winner.token, method: 'POST' });
     await require('../src/payments').createPayments(prisma).review(payment.id, true, 'integration-test', 'Verified against isolated test transfer');
+    await call(`/requests/${repair.id}/commission-confirm`, { token: winner.token, method: 'POST', body: { confirmed: true } });
     await call(`/requests/${repair.id}/status`, { token: winner.token, method: 'PATCH', body: { status: 'COMPLETED' } });
     const earnings = await call('/drivers/earnings', { token: winner.token });
     assert.equal(earnings.totalToman, 700000);
     assert.equal(await prisma.driverEarning.count(), 1);
+    const nextJob = await call(`/requests/${tow.id}/accept`, { token: winner.token, method: 'POST' });
+    assert.equal(nextJob.driverId, winner.user.id);
+    assert.equal(nextJob.status, 'ACCEPTED');
     await call(`/requests/${repair.id}/tracking`, { token: customer.token, status: 409 });
     await call('/auth/logout', { token: customer.token, method: 'POST', status: 204 });
     await call('/me', { token: customer.token, status: 401 });
