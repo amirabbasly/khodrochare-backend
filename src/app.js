@@ -59,6 +59,13 @@ function createApp({ prisma, redis, config, io, services: s }) {
     const { q } = z.object({ q: z.string().trim().min(3).max(150) }).parse(req.query);
     res.json(await geocoder.search(q));
   });
+  require('./monitoring').registerMonitoring({ app, prisma, redis, config, auth, limit, geocoder });
+  app.post('/api/v1/locations/reverse', auth, limit('reverse', 60, 60), async (req, res) => {
+    const point = d.point.parse(req.body);
+    const place = await geocoder.resolve(null, point);
+    await redis.set(`place:${place.id}`, JSON.stringify(place), 'EX', 3600);
+    res.json(place);
+  });
   // Private image storage: never expose uploads as a static directory.
   const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024, files: 1, fields: 0 } });
   app.post('/api/v1/documents', limit('upload', 10, 3600), upload.single('file'), async (req, res) => {
@@ -186,9 +193,21 @@ function createApp({ prisma, redis, config, io, services: s }) {
       res.status(201).json(await s.createRequest(req.user, schema.parse(req.body), service));
     });
   }
+  app.post('/api/v1/requests/:id/operations/start', auth, role('DRIVER'), async (req, res) => {
+    res.json(await prisma.$transaction(async tx => {
+      await lockRequest(tx, req.params.id);
+      const request = await tx.assistanceRequest.findUnique({ where: { id: req.params.id } });
+      if (!request || request.driverId !== req.user.id) throw new d.HttpError(404, 'Request not found');
+      if (request.service !== 'REPAIR' || request.status !== 'ARRIVED' || request.partsApprovedToman == null) throw new d.HttpError(409, 'Approved parts quote required before operations');
+      if (request.operationsStartedAt) return request;
+      const result = await tx.assistanceRequest.update({ where: { id: request.id }, data: { operationsStartedAt: new Date() } });
+      await tx.outbox.create({ data: { requestId: request.id } });
+      return result;
+    }));
+  });
   app.get('/api/v1/requests', auth, async (req, res) => {
     const { page } = z.object({ page: z.coerce.number().int().positive().max(10000).default(1) }).parse(req.query);
-    res.json(await prisma.assistanceRequest.findMany({ where: req.user.role === 'CUSTOMER' ? { customerId: req.user.id } : { driverId: req.user.id }, orderBy: { createdAt: 'desc' }, take: 50, skip: (page - 1) * 50 }));
+    res.json(await prisma.assistanceRequest.findMany({ where: req.user.role === 'CUSTOMER' ? { customerId: req.user.id } : { driverId: req.user.id }, orderBy: { createdAt: 'desc' }, take: 50, skip: (page - 1) * 50, include: { payment: { select: { status: true } } } }));
   });
   app.get('/api/v1/drivers/requests/available', auth, role('DRIVER'), async (req, res) => {
     const requests = await prisma.assistanceRequest.findMany({ where: { status: 'PENDING', service: { in: req.user.services } }, select: { id: true, service: true, vehicleName: true, originLat: true, originLng: true, originAddress: true, destinationAddress: true, destinationLat: true, destinationLng: true, distanceMeters: true, priceToman: true, pricingBreakdown: true, createdAt: true }, orderBy: { createdAt: 'desc' }, take: 50 });
@@ -222,6 +241,10 @@ function createApp({ prisma, redis, config, io, services: s }) {
     if (!allowed) throw new d.HttpError(409, 'Invalid status transition');
     await prisma.$transaction(async tx => {
       await lockRequest(tx, request.id);
+      if (status === 'COMPLETED' && request.service === 'REPAIR') {
+        const fresh = await tx.assistanceRequest.findUnique({ where: { id: request.id }, include: { payment: true } });
+        if (!fresh.operationsStartedAt || fresh.partsApprovedToman == null || fresh.payment?.status !== 'VERIFIED') throw new d.HttpError(409, 'Operations and verified payment required before completion');
+      }
       if (status === 'CANCELLED') {
         const payment = await tx.payment.findUnique({ where: { requestId: request.id } });
         if (payment && ['SUBMITTED', 'VERIFIED'].includes(payment.status)) throw new d.HttpError(409, 'Contact support for payment refund before cancellation');

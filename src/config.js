@@ -1,6 +1,8 @@
 require('dotenv').config({ quiet: true });
 const { z } = require('zod');
 const config = z.object({
+  ADMIN_USERNAME: z.string().default('admin'),
+  ADMIN_PASSWORD_HASH: z.string().default(''),
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().min(1).max(65535).default(4000),
   DATABASE_URL: z.string().min(1), REDIS_URL: z.string().min(1),

@@ -94,6 +94,8 @@ function createServices({ prisma, redis, config, io }) {
   async function createRequest(user, input, service) {
     const now = new Date();
     const prepared = service === 'TOWING' ? await prepareTowing(input, now) : null;
+    let repairAddress = null;
+    if (service === 'REPAIR' && config?.PHOTON_URL) { try { repairAddress = await geocoder.resolve(null, input.origin); } catch {} }
     const route = prepared?.route;
     if (prepared) input = prepared.input;
     if (route && route.meters < 1) throw new HttpError(400, 'Origin and destination must differ');
@@ -102,7 +104,8 @@ function createServices({ prisma, redis, config, io }) {
       const request = await tx.assistanceRequest.create({ data: {
         customerId: user.id, service, vehicleName: input.vehicleName, vehiclePlate: input.vehiclePlate,
         vehicleModelId: prepared?.model?.id || undefined,
-        originAddress: prepared?.input.origin.label, destinationAddress: prepared?.input.destination.label,
+        originProvince: prepared?.input.origin.province || repairAddress?.province,
+        originAddress: prepared?.input.origin.label || repairAddress?.label, destinationAddress: prepared?.input.destination.label,
         originLat: input.origin.latitude, originLng: input.origin.longitude,
         destinationLat: input.destination?.latitude, destinationLng: input.destination?.longitude,
         problem: input.problem, distanceMeters: route?.meters, distanceMethod: route?.method,

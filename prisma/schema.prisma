@@ -40,6 +40,7 @@ model User {
   sessions Session[]
   requests AssistanceRequest[] @relation("CustomerRequests")
   assignments AssistanceRequest[] @relation("DriverRequests")
+  telemetry UserLocation?
   location DriverLocation?
   earnings DriverEarning[]
   createdAt DateTime @default(now())
@@ -87,11 +88,13 @@ model AssistanceRequest {
   vehiclePlate String
   vehicleModelId String?
   vehicleModel VehicleModel? @relation(fields: [vehicleModelId], references: [id])
+  originProvince String?
   originAddress String?
   destinationAddress String?
   partsQuoteToman Int?
   partsQuoteVersion Int @default(0)
   partsApprovedToman Int?
+  operationsStartedAt DateTime?
   partsApprovedAt DateTime?
   payment Payment?
   problem String?
@@ -190,4 +193,14 @@ model Outbox {
   publishedAt DateTime?
   createdAt DateTime @default(now())
   @@index([publishedAt])
+}
+
+model UserLocation {
+  userId String @id
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  latitude Float
+  longitude Float
+  province String
+  recordedAt DateTime
+  @@index([province])
 }

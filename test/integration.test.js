@@ -107,8 +107,9 @@ test('real PostGIS / Redis / HTTP / Socket.IO lifecycle', { skip: !enabled, time
     const reported = await call(`/requests/${repair.id}/payment/report`, { token: customer.token, method: 'POST', body: { bankReference: 'TEST-' + Date.now(), transferredAt: new Date().toISOString() } });
     assert.equal(reported.status, 'SUBMITTED');
     assert.equal(await prisma.driverEarning.count(), 0);
-    await call(`/requests/${repair.id}/status`, { token: winner.token, method: 'PATCH', body: { status: 'COMPLETED' } });
+    await call(`/requests/${repair.id}/operations/start`, { token: winner.token, method: 'POST' });
     await require('../src/payments').createPayments(prisma).review(payment.id, true, 'integration-test', 'Verified against isolated test transfer');
+    await call(`/requests/${repair.id}/status`, { token: winner.token, method: 'PATCH', body: { status: 'COMPLETED' } });
     const earnings = await call('/drivers/earnings', { token: winner.token });
     assert.equal(earnings.totalToman, 700000);
     assert.equal(await prisma.driverEarning.count(), 1);

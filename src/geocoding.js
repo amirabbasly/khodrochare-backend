@@ -6,9 +6,10 @@ function addressFeature(feature) {
   if (p.countrycode && p.countrycode.toLowerCase() !== 'ir') return null;
   const city = p.city || p.town || p.village || p.county || p.state || '';
   const street = p.street || p.name || p.district || '';
-  const label = [...new Set([city, street].filter(Boolean))].join('، ').slice(0, 300);
+  const province = p.state || p.county || city;
+  const label = [...new Set([province, city, street].filter(Boolean))].join('، ').slice(0, 300);
   if (!label) return null;
-  return { id: hash(JSON.stringify([latitude, longitude, label])), latitude, longitude, city, street, label };
+  return { id: hash(JSON.stringify([latitude, longitude, label])), latitude, longitude, province, city, street, label };
 }
 function createGeocoder({ redis, config }) {
   async function fetchPlaces(path, params) {
@@ -41,7 +42,9 @@ function createGeocoder({ redis, config }) {
     const places = await fetchPlaces('/reverse', { lat: point.latitude, lon: point.longitude, limit: 1 });
     if (!places.length) throw new HttpError(400, 'Street address not found');
     // Reverse geocoding names the selected point without moving it to a street centroid.
-    return { ...places[0], ...point };
+    const place = { ...places[0], ...point };
+    place.id = hash(JSON.stringify([place.latitude, place.longitude, place.label]));
+    return place;
   }
   return { search: query => fetchPlaces('/api', { q: query, limit: 5, countrycode: 'IR', layer: 'street' }), resolve };
 }

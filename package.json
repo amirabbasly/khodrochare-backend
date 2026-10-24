@@ -4,11 +4,13 @@
   "description": "Khodrochare customer and roadside assistance API",
   "main": "src/server.js",
   "private": true,
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
-    "test": "node --test test/domain.test.js test/services.test.js test/http.test.js test/realtime.test.js test/pricing.test.js test/session-cookies.test.js test/catalog-geocoding.test.js test/payments.test.js",
+    "test": "node --test test/domain.test.js test/services.test.js test/http.test.js test/realtime.test.js test/pricing.test.js test/session-cookies.test.js test/catalog-geocoding.test.js test/payments.test.js test/monitoring.test.js",
     "test:integration": "node --test test/integration.test.js",
     "prisma:generate": "prisma generate",
     "prisma:validate": "prisma validate",
@@ -32,7 +34,9 @@
     "socket.io": "^4.8.4",
     "zod": "^4.6.7"
   },
-  "overrides": { "deepmerge-ts": "8.0.0" },
+  "overrides": {
+    "deepmerge-ts": "8.0.0"
+  },
   "devDependencies": {
     "socket.io-client": "^4.8.4"
   }

@@ -76,3 +76,6 @@ docker compose -p khodrochare-test -f compose.yaml -f compose.test.yaml down -v
 تست یکپارچه به دیتابیس با نام `khodrochare_test` و `NODE_ENV=test` محدود شده و سناریوی ثبت‌نام، سند، ورود، جداسازی نقش‌ها، ثبت حمل و تعمیر، محاسبه PostGIS و قیمت، رقابت دو امدادگر برای پذیرش، دریافت GPS توسط هر دو طرف و خروج را پوشش می‌دهد. برای تکرار آن volumeهای پروژه تست را پاک کنید.
 
 وضعیت اعتبارسنجی همین محیط در [docs/VALIDATION.md](docs/VALIDATION.md) ثبت می‌شود. اتصال دو اپ و امکانات آدرس، کاتالوگ و پرداخت در نسخه‌های بعدی همین پوشه تکمیل شده است. [راهنمای استقرار و بررسی واریز](docs/ADDRESSES-CATALOG-PAYMENTS.md).
+
+
+نسخه پنل مشاهده‌ای، پایش GPS، نقشه حمل، پروفایل و مراحل عملیات امداد: [راهنمای نسخه جدید](docs/MONITORING-AND-APP-UPDATE.md).
