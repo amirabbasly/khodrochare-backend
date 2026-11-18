@@ -2,6 +2,8 @@ require('dotenv').config({ quiet: true });
 const { z } = require('zod');
 const config = z.object({
   ZARINPAL_MODE: z.enum(['sandbox','live']).default('sandbox'),
+  HALL_PLANS_JSON:z.string().optional(),
+  HALL_BANNERS_JSON:z.string().optional(),
   ZARINPAL_MERCHANT_ID: z.string().default(''),
   PAYMENT_CALLBACK_URL: z.string().url().default('https://api.khodrochare.ir/api/v1/payments/zarinpal/callback'),
   CUSTOMER_APP_URL: z.string().url().default('https://app.khodrochare.ir'),

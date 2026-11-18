@@ -46,6 +46,9 @@ model User {
   earnings DriverEarning[]
   checkouts GatewayCheckout[]
   walletEntries WalletEntry[]
+  hallListings HallListing[]
+  hallOrders HallOrder[]
+  hallInquiries HallInquiry[]
   createdAt DateTime @default(now())
   @@unique([role, phone])
   @@unique([role, nationalId])
@@ -692,4 +695,113 @@ model MarketAuditLog {
   note String
   createdAt DateTime @default(now())
   @@index([entityId, createdAt])
+}
+
+
+model HallListing {
+  id String @id @default(uuid())
+  ownerId String
+  owner User @relation(fields: [ownerId], references: [id])
+  status String @default("DRAFT")
+  version Int @default(0)
+  draft Json @default("{}")
+  make String @default("")
+  model String @default("")
+  trim String @default("")
+  makeKey String @default("")
+  modelKey String @default("")
+  trimKey String @default("")
+  searchText String @default("")
+  year Int?
+  mileage Int?
+  city String @default("")
+  bodyCondition String @default("")
+  technicalCondition String @default("")
+  priceToman BigInt?
+  inspectionStatus String @default("NOT_INSPECTED")
+  inspectionNote String?
+  viewCount Int @default(0)
+  publishedAt DateTime?
+  bumpedAt DateTime?
+  featuredUntil DateTime?
+  urgentUntil DateTime?
+  ladderUntil DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  photos HallPhoto[]
+  orders HallOrder[]
+  inquiries HallInquiry[]
+  @@index([status, publishedAt])
+  @@index([ownerId, updatedAt])
+  @@index([makeKey, modelKey, trimKey, year])
+}
+model HallPhoto {
+  id String @id @default(uuid())
+  listingId String
+  listing HallListing @relation(fields: [listingId], references: [id])
+  storageKey String @unique
+  readToken String @default(uuid())
+  mimeType String
+  position Int @default(0)
+  createdAt DateTime @default(now())
+  @@index([listingId, position])
+}
+model HallPlan {
+  code String @id
+  name String
+  kind String @default("PLAN")
+  description String
+  priceToman Int
+  services String[]
+  terms String
+  active Boolean @default(true)
+  durationHours Int @default(168)
+  sortOrder Int @default(0)
+  updatedAt DateTime @updatedAt
+}
+model HallOrder {
+  id String @id @default(uuid())
+  userId String
+  user User @relation(fields: [userId], references: [id])
+  listingId String
+  listing HallListing @relation(fields: [listingId], references: [id])
+  listingVersion Int
+  action String
+  planCode String
+  snapshot Json
+  amountToman Int
+  mode String @default("sandbox")
+  status String @default("CREATING")
+  idempotencyKey String
+  authority String? @unique
+  refId String?
+  errorCode String?
+  supportNote String?
+  createdAt DateTime @default(now())
+  verifiedAt DateTime?
+  activatedAt DateTime?
+  @@unique([userId, idempotencyKey])
+  @@index([listingId, status])
+  @@index([createdAt])
+}
+model HallInquiry {
+  id String @id @default(uuid())
+  listingId String
+  listing HallListing @relation(fields: [listingId], references: [id])
+  userId String
+  user User @relation(fields: [userId], references: [id])
+  message String
+  contactPhone String
+  createdAt DateTime @default(now())
+  @@unique([listingId, userId])
+}
+model HallBanner {
+  id String @id @default(uuid())
+  title String
+  subtitle String @default("")
+  imageUrl String
+  linkUrl String
+  active Boolean @default(true)
+  sortOrder Int @default(0)
+  createdAt DateTime @default(now())
 }

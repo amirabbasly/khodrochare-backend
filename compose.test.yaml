@@ -15,7 +15,7 @@ services:
       TOW_BASE_TOMAN: 200000
       TOW_PER_KM_TOMAN: 20000
       RUN_INTEGRATION: '1'
-    command: [sh, -c, 'npx prisma migrate deploy && node --test test/integration.test.js test/market-integration.test.js']
+    command: [sh, -c, 'npx prisma migrate deploy && node --test test/integration.test.js test/market-integration.test.js test/hall-integration.test.js']
     ports: !reset []
     healthcheck:
       disable: true

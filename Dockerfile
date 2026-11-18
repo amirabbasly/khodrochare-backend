@@ -14,7 +14,7 @@ COPY test ./test
 FROM build AS test
 RUN npm test
 FROM build AS integration
-CMD ["sh", "-c", "npx prisma migrate deploy && node --test test/integration.test.js test/market-integration.test.js"]
+CMD ["sh", "-c", "npx prisma migrate deploy && node --test test/integration.test.js test/market-integration.test.js test/hall-integration.test.js"]
 FROM build AS production
 RUN npm prune --omit=dev --ignore-scripts
 RUN mkdir -p /app/uploads && chown -R node:node /app
