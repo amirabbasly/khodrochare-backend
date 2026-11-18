@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { splitAmount, createPayments, settleEarning, CARD_NUMBER } = require('../src/payments');
+const { splitAmount, createPayments, settleEarning } = require('../src/payments');
 test('commission includes service AND parts, with exact 30/70 and 20/80 splits', () => {
   assert.deepEqual(splitAmount('REPAIR', 800000, 200000), { serviceToman: 800000, partsToman: 200000, amountToman: 1000000, commissionPercent: 30, commissionToman: 300000, driverShareToman: 700000 });
   assert.equal(splitAmount('TOWING', 1000000, 200000).commissionToman, 240000);
@@ -8,7 +8,6 @@ test('commission includes service AND parts, with exact 30/70 and 20/80 splits',
   assert.equal(odd.commissionToman + odd.driverShareToman, odd.amountToman);
   for (const amount of [-1, 1.5, NaN, 2147483648]) assert.throws(() => splitAmount('REPAIR', amount, 0));
   assert.throws(() => splitAmount('UNKNOWN', 1000));
-  assert.equal(CARD_NUMBER, '6219861435789192');
 });
 function database(request) {
   let payment = null;
@@ -39,6 +38,7 @@ test('repair payment requires customer-approved parts and uses the stored total'
   request.partsApprovedToman = 200000;
   const result = await payments.getOrCreate('r', 'c');
   assert.equal(result.amountToman, 1000000); assert.equal(result.driverShareToman, 700000);
+  assert.equal(result.cardNumber, undefined);
   assert.equal((await payments.getOrCreate('r', 'c')).id, result.id);
 });
 test('reporting a transfer never credits the driver; verification and completion are both required', async () => {

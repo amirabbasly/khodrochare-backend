@@ -45,6 +45,7 @@ function createApp({ prisma, redis, config, io, services: s }) {
     } catch (e) { next(e); }
   };
   app.get('/health/live', (req, res) => res.json({ status: 'ok' }));
+  require('./gateway-routes').registerGateway({app,prisma,config,auth,role,limit});
   app.get('/health/ready', async (req, res) => {
     try { await Promise.all([prisma.$queryRaw`SELECT 1`, redis.ping()]); res.json({ status: 'ok' }); }
     catch { res.status(503).json({ status: 'unavailable' }); }
@@ -177,12 +178,11 @@ function createApp({ prisma, redis, config, io, services: s }) {
   });
   app.get('/api/v1/requests/:id/payment', auth, async (req, res) => {
     const request = await s.ownedRequest(req.params.id, req.user);
-    res.json(await prisma.payment.findUnique({ where: { requestId: request.id }, include: { attempts: { orderBy: { createdAt: 'desc' }, take: 1 } } }));
+    res.json(require('./gateway-payments').safePayment(await prisma.payment.findUnique({ where: { requestId: request.id } }),config.ZARINPAL_MODE));
   });
-  app.post('/api/v1/requests/:id/payment', auth, role('CUSTOMER'), async (req, res) => res.status(201).json(await payments.getOrCreate(req.params.id, req.user.id)));
+  app.post('/api/v1/requests/:id/payment', auth, role('CUSTOMER'), async (req, res) => res.status(201).json(require('./gateway-payments').safePayment(await payments.getOrCreate(req.params.id, req.user.id),config.ZARINPAL_MODE)));
   app.post('/api/v1/requests/:id/payment/report', auth, role('CUSTOMER'), async (req, res) => {
-    const input = z.object({ bankReference: z.string().trim().min(6).max(64).regex(/^[0-9A-Za-z-]+$/), transferredAt: z.iso.datetime() }).strict().parse(req.body);
-    res.json(await payments.submit(req.params.id, req.user.id, input));
+    throw new d.HttpError(410, 'Manual transfers have been replaced by online payment');
   });
   app.get('/api/v1/drivers/earnings', auth, role('DRIVER'), async (req, res) => {
     const [entries, total] = await Promise.all([prisma.driverEarning.findMany({ where: { driverId: req.user.id }, orderBy: { createdAt: 'desc' }, take: 50 }), prisma.driverEarning.aggregate({ where: { driverId: req.user.id }, _sum: { amountToman: true } })]);
@@ -260,7 +260,7 @@ function createApp({ prisma, redis, config, io, services: s }) {
       }
       if (status === 'CANCELLED') {
         const payment = await tx.payment.findUnique({ where: { requestId: request.id } });
-        if (payment && ['SUBMITTED', 'VERIFIED'].includes(payment.status)) throw new d.HttpError(409, 'Contact support for payment refund before cancellation');
+        if (payment && ['SUBMITTED', 'VERIFIED', 'GATEWAY_PENDING', 'REFUND_REQUIRED'].includes(payment.status)) throw new d.HttpError(409, 'Contact support for payment refund before cancellation');
       }
       const updated = await tx.assistanceRequest.updateMany({ where: { id: request.id, status: request.status }, data: { status } });
       if (!updated.count) throw new d.HttpError(409, 'Request changed; reload');
@@ -274,9 +274,12 @@ function createApp({ prisma, redis, config, io, services: s }) {
   app.use((err, req, res, next) => {
     if (res.headersSent) return next(err);
     if (err instanceof z.ZodError) return res.status(400).json({ error: 'Validation failed', issues: err.issues });
-    if (err.code === 'P2002') return res.status(409).json({ error: req.path.includes('payment') ? 'Bank reference already used' : 'Phone or national ID already registered for this role' });
+    if (req.path.includes('/market') && err.code === 'P2002') return res.status(409).json({ error: 'Market record already exists' });
+    if (req.path.includes('/market') && err.code === 'P2025') return res.status(404).json({ error: 'Market record not found' });
+    if (req.path.includes('/market') && err.code === 'P2003') return res.status(400).json({ error: 'Invalid market reference' });
+    if (err.code === 'P2002') return res.status(409).json({ error: req.path.includes('payment') || req.path.includes('wallet') ? 'Payment attempt already exists' : 'Phone or national ID already registered for this role' });
     if (err instanceof multer.MulterError) return res.status(400).json({ error: err.message });
-    const status = err.status >= 400 && err.status < 500 ? err.status : err.status === 503 ? 503 : 500;
+    const status = err.status >= 400 && err.status < 500 ? err.status : err.status === 503 ? 503 : err instanceof d.HttpError && err.status === 502 ? 502 : 500;
     if (status === 500) console.error({ error: err.message, code: err.code });
     res.status(status).json({ error: status === 500 ? 'Internal server error' : err.message });
   });

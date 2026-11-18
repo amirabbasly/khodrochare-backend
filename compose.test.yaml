@@ -4,6 +4,9 @@ services:
     environment:
       POSTGRES_DB: khodrochare_test
   api:
+    build:
+      context: .
+      target: integration
     restart: 'no'
     environment:
       NODE_ENV: test
@@ -12,7 +15,10 @@ services:
       TOW_BASE_TOMAN: 200000
       TOW_PER_KM_TOMAN: 20000
       RUN_INTEGRATION: '1'
-    command: [sh, -c, 'npx prisma migrate deploy && node --test test/integration.test.js']
+    command: [sh, -c, 'npx prisma migrate deploy && node --test test/integration.test.js test/market-integration.test.js']
     ports: !reset []
     healthcheck:
       disable: true
+
+  market-worker:
+    profiles: [disabled-in-test]

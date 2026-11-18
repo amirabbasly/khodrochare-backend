@@ -27,7 +27,9 @@ services:
       timeout: 5s
       retries: 20
   api:
-    build: .
+    build:
+      context: .
+      target: production
     restart: unless-stopped
     init: true
     env_file: .env
@@ -53,6 +55,29 @@ services:
       retries: 5
       start_period: 60s
     stop_grace_period: 30s
+  market-worker:
+    shm_size: '512mb'
+    build:
+      context: .
+      target: production
+    command: [node, src/market/worker.js]
+    restart: unless-stopped
+    init: true
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, node, -e, 'const R=require("ioredis"),r=new R(process.env.REDIS_URL);r.get("market:worker-heartbeat").then(v=>{r.disconnect();process.exit(v?0:1)}).catch(()=>process.exit(1))']
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 180s
+    stop_grace_period: 60s
 volumes:
   postgres_data:
   redis_data:

@@ -1,0 +1,73 @@
+{
+  "items": [
+    {
+      "externalId": "a-1",
+      "name": "لنت ترمز جلو پژو ۲۰۶ تیپ ۵ TRW",
+      "brand": "TRW",
+      "category": "brakes",
+      "partNumber": "GDB-1330",
+      "condition": "NEW",
+      "authenticity": "AFTERMARKET",
+      "description": "اطلاعات آزمایشی قرارداد اتصال؛ برای فروش واقعی نیست.",
+      "images": [],
+      "specifications": {
+        "محور": "جلو"
+      },
+      "fitments": [
+        {
+          "maker": "پژو",
+          "model": "۲۰۶",
+          "trim": "تیپ ۵",
+          "yearFrom": 1380,
+          "yearTo": 1399
+        }
+      ],
+      "url": "https://seller-a.fixture-shop.ir/parts/a-1",
+      "currency": "IRT",
+      "price": "۹۵۰٬۰۰۰",
+      "shipping": null,
+      "inStock": true,
+      "quantity": 2,
+      "seller": {
+        "externalId": "seller-a",
+        "name": "فروشنده آزمایشی a",
+        "url": "https://seller-a.fixture-shop.ir/"
+      }
+    },
+    {
+      "externalId": "b-1",
+      "name": "لنت جلو 206 تیپ 5 تی آر دبلیو",
+      "brand": "TRW",
+      "category": "brakes",
+      "partNumber": "GDB-1330",
+      "condition": "NEW",
+      "authenticity": "AFTERMARKET",
+      "description": "اطلاعات آزمایشی قرارداد اتصال؛ برای فروش واقعی نیست.",
+      "images": [],
+      "specifications": {
+        "محور": "جلو"
+      },
+      "fitments": [
+        {
+          "maker": "پژو",
+          "model": "۲۰۶",
+          "trim": "تیپ ۵",
+          "yearFrom": 1380,
+          "yearTo": 1399
+        }
+      ],
+      "url": "https://seller-b.fixture-shop.ir/parts/b-1",
+      "currency": "IRR",
+      "price": "11000000",
+      "shipping": null,
+      "inStock": true,
+      "quantity": 2,
+      "seller": {
+        "externalId": "seller-b",
+        "name": "فروشنده آزمایشی b",
+        "url": "https://seller-b.fixture-shop.ir/"
+      }
+    }
+  ],
+  "next": null
+}

@@ -104,7 +104,10 @@ test('real PostGIS / Redis / HTTP / Socket.IO lifecycle', { skip: !enabled, time
     assert.equal(payment.amountToman, 1000000);
     assert.equal(payment.commissionToman, 300000);
     assert.equal(payment.driverShareToman, 700000);
-    const reported = await call(`/requests/${repair.id}/payment/report`, { token: customer.token, method: 'POST', body: { bankReference: 'TEST-' + Date.now(), transferredAt: new Date().toISOString() } });
+    await call(`/requests/${repair.id}/payment/report`, { token: customer.token, method: 'POST', body: {}, status: 410 });
+    // Legacy audit compatibility is internal-only; new payments use the gateway.
+    await prisma.payment.update({where:{id:payment.id},data:{status:'AWAITING_TRANSFER'}});
+    const reported = await require('../src/payments').createPayments(prisma).submit(repair.id,customer.user.id,{bankReference:'TEST-'+Date.now(),transferredAt:new Date().toISOString()});
     assert.equal(reported.status, 'SUBMITTED');
     assert.equal(await prisma.driverEarning.count(), 0);
     await call(`/requests/${repair.id}/operations/start`, { token: winner.token, method: 'POST' });
@@ -114,6 +117,12 @@ test('real PostGIS / Redis / HTTP / Socket.IO lifecycle', { skip: !enabled, time
     const earnings = await call('/drivers/earnings', { token: winner.token });
     assert.equal(earnings.totalToman, 700000);
     assert.equal(await prisma.driverEarning.count(), 1);
+    const mockAuthority='S'+require('node:crypto').randomBytes(18).toString('hex').slice(0,35);
+    const gateway=require('../src/gateway-payments').createGatewayPayments(prisma,{}, {mode:'sandbox',merchant:()=> 'integration-sandbox-only',request:async()=>({authority:mockAuthority}),redirect:()=> 'https://sandbox.zarinpal.com/pg/StartPay/'+mockAuthority,verify:async()=>({refId:'integration-reference'})});
+    const checkout=await gateway.start(customer.user,{amountToman:10000,idempotencyKey:require('node:crypto').randomUUID()});
+    await gateway.verify(checkout.id,mockAuthority,'OK');await gateway.verify(checkout.id,mockAuthority,'OK');
+    assert.equal(await prisma.walletEntry.count({where:{checkoutId:checkout.id}}),1);
+    const wallet=await call('/wallet',{token:customer.token});assert.equal(wallet.balanceToman,0);assert.equal(wallet.sandboxBalanceToman,10000);
     const nextJob = await call(`/requests/${tow.id}/accept`, { token: winner.token, method: 'POST' });
     assert.equal(nextJob.driverId, winner.user.id);
     assert.equal(nextJob.status, 'ACCEPTED');

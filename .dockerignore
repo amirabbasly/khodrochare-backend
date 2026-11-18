@@ -4,3 +4,6 @@ node_modules
 uploads
 coverage
 *.log
+ADMIN-CREDENTIALS.txt
+prisma/before-market.prisma
+prisma/market.prisma.fragment

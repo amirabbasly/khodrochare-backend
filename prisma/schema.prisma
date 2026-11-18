@@ -42,7 +42,10 @@ model User {
   assignments AssistanceRequest[] @relation("DriverRequests")
   telemetry UserLocation?
   location DriverLocation?
+  marketAlerts MarketAlert[]
   earnings DriverEarning[]
+  checkouts GatewayCheckout[]
+  walletEntries WalletEntry[]
   createdAt DateTime @default(now())
   @@unique([role, phone])
   @@unique([role, nationalId])
@@ -142,19 +145,53 @@ model Payment {
   id String @id @default(uuid())
   requestId String @unique
   request AssistanceRequest @relation(fields: [requestId], references: [id])
-  status String @default("AWAITING_TRANSFER")
+  status String @default("AWAITING_PAYMENT")
   serviceToman Int
   partsToman Int
   amountToman Int
   commissionPercent Int
   commissionToman Int
   driverShareToman Int
-  cardNumber String
-  accountName String
+  cardNumber String?
+  accountName String?
   createdAt DateTime @default(now())
   verifiedAt DateTime?
   attempts PaymentAttempt[]
   earning DriverEarning?
+  checkouts GatewayCheckout[]
+}
+model GatewayCheckout {
+  id String @id @default(uuid())
+  userId String
+  user User @relation(fields:[userId],references:[id])
+  paymentId String?
+  payment Payment? @relation(fields:[paymentId],references:[id])
+  purpose String
+  mode String
+  amountToman Int
+  status String @default("CREATING")
+  idempotencyKey String
+  authority String? @unique
+  refId String?
+  merchantHash String
+  errorCode String?
+  createdAt DateTime @default(now())
+  verifiedAt DateTime?
+  walletEntry WalletEntry?
+  @@unique([userId,idempotencyKey])
+  @@index([paymentId,status])
+  @@index([userId,createdAt])
+}
+model WalletEntry {
+  id String @id @default(uuid())
+  userId String
+  user User @relation(fields:[userId],references:[id])
+  checkoutId String @unique
+  checkout GatewayCheckout @relation(fields:[checkoutId],references:[id])
+  amountToman Int
+  mode String
+  createdAt DateTime @default(now())
+  @@index([userId,mode,createdAt])
 }
 model PaymentAttempt {
   id String @id @default(uuid())
@@ -204,4 +241,455 @@ model UserLocation {
   province String
   recordedAt DateTime
   @@index([province])
+}
+
+enum MarketCondition {
+  UNKNOWN
+  NEW
+  REFURBISHED
+  USED
+}
+enum MarketAuthenticity {
+  GENUINE
+  OEM
+  AFTERMARKET
+  UNKNOWN
+}
+enum MarketReviewStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+enum MarketRunStatus {
+  QUEUED
+  RUNNING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+model MarketCategory {
+  torobId String? @unique
+  sourceUrl String?
+  id String @id @default(uuid())
+  slug String @unique
+  name String
+  parentId String?
+  parent MarketCategory? @relation("MarketCategoryTree", fields: [parentId], references: [id])
+  children MarketCategory[] @relation("MarketCategoryTree")
+  active Boolean @default(true)
+  products MarketProduct[]
+  @@index([parentId])
+}
+model MarketBrand {
+  id String @id @default(uuid())
+  name String
+  key String @unique
+  active Boolean @default(true)
+  products MarketProduct[]
+}
+model MarketCar {
+  aliases String[] @default([])
+  engineCode String?
+  transmission String?
+  sourceUrl String?
+  catalogCheckedAt DateTime?
+  compatibilities MarketProductCompatibility[]
+  id String @id @default(uuid())
+  key String @unique
+  maker String
+  model String
+  trim String
+  fitments MarketFitment[]
+}
+model MarketProduct {
+  torobReference MarketReferencePrice?
+  compatibilities MarketProductCompatibility[]
+  id String @id @default(uuid())
+  name String
+  englishName String?
+  searchText String
+  identityKey String @unique
+  categoryId String
+  category MarketCategory @relation(fields: [categoryId], references: [id])
+  brandId String
+  brand MarketBrand @relation(fields: [brandId], references: [id])
+  partNumber String?
+  oemNumber String?
+  condition MarketCondition
+  authenticity MarketAuthenticity
+  country String?
+  description String @default("")
+  images String[]
+  specifications Json
+  fitmentSignature String
+  active Boolean @default(true)
+  fitments MarketFitment[]
+  listings MarketListing[]
+  reviews MarketMatchReview[]
+  offers MarketOffer[]
+  snapshots MarketPriceSnapshot[]
+  archives MarketDailyPrice[]
+  alerts MarketAlert[]
+  minPriceToman Int?
+  maxPriceToman Int?
+  avgPriceToman Int?
+  offerCount Int @default(0)
+  dealScore Int @default(0)
+  dropPercent Int @default(0)
+  summaryAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([categoryId, active, minPriceToman, id])
+  @@index([brandId, active])
+  @@index([active, dealScore, id])
+  @@index([active, minPriceToman, id])
+  @@index([active, createdAt, id])
+  @@index([partNumber, brandId])
+  @@index([oemNumber, brandId])
+}
+model MarketFitment {
+  id String @id @default(uuid())
+  productId String
+  product MarketProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
+  carId String
+  car MarketCar @relation(fields: [carId], references: [id])
+  yearFrom Int
+  yearTo Int
+  @@unique([productId, carId, yearFrom, yearTo])
+  @@index([carId, yearFrom, yearTo])
+}
+model MarketSource {
+  nextCursor String?
+  configVersion Int @default(1)
+  id String @id @default(uuid())
+  name String
+  kind String
+  adapter String
+  baseUrl String
+  allowedHosts String[]
+  config Json
+  secretEnv String?
+  licenseUrl String?
+  permissionExpiresAt DateTime?
+  active Boolean @default(false)
+  intervalMinutes Int @default(360)
+  minDelayMs Int @default(3000)
+  maxPages Int @default(25)
+  offerTtlHours Int @default(24)
+  nextRunAt DateTime @default(now())
+  lastCheckedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  sellers MarketSeller[]
+  listings MarketListing[]
+  runs MarketCrawlRun[]
+  @@unique([kind, baseUrl])
+  @@index([active, nextRunAt])
+}
+model MarketSeller {
+  id String @id @default(uuid())
+  sourceId String
+  source MarketSource @relation(fields: [sourceId], references: [id])
+  externalId String
+  name String
+  domain String @unique
+  url String
+  logo String?
+  contact String?
+  active Boolean @default(true)
+  reputation Int @default(0)
+  verified Boolean @default(false)
+  lastCheckedAt DateTime?
+  listings MarketListing[]
+  @@unique([sourceId, externalId])
+}
+model MarketListing {
+  sourceFingerprint String
+  metadataOverrides Json?
+  id String @id @default(uuid())
+  sourceId String
+  source MarketSource @relation(fields: [sourceId], references: [id])
+  externalId String
+  sellerId String
+  seller MarketSeller @relation(fields: [sellerId], references: [id])
+  productId String?
+  product MarketProduct? @relation(fields: [productId], references: [id])
+  title String
+  url String
+  normalized Json
+  fingerprint String
+  matchScore Int @default(0)
+  matchStatus MarketReviewStatus @default(PENDING)
+  checkedAt DateTime
+  offer MarketOffer?
+  snapshots MarketPriceSnapshot[]
+  reviews MarketMatchReview[]
+  @@unique([sourceId, externalId])
+  @@index([productId, matchStatus])
+  @@index([matchStatus, checkedAt])
+  @@index([sellerId])
+}
+model MarketMatchReview {
+  id String @id @default(uuid())
+  listingId String
+  listing MarketListing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  candidateId String?
+  candidate MarketProduct? @relation(fields: [candidateId], references: [id])
+  score Int
+  reasons Json
+  fingerprint String
+  status MarketReviewStatus @default(PENDING)
+  operator String?
+  note String?
+  reviewedAt DateTime?
+  createdAt DateTime @default(now())
+  @@unique([listingId, fingerprint])
+  @@index([status, createdAt])
+}
+model MarketOffer {
+  productId String?
+  product MarketProduct? @relation(fields: [productId], references: [id])
+  @@index([productId, inStock, expiresAt, priceToman])
+  id String @id @default(uuid())
+  listingId String @unique
+  listing MarketListing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  priceToman Int
+  shippingToman Int?
+  inStock Boolean
+  quantity Int?
+  suspicious Boolean @default(false)
+  checkedAt DateTime
+  expiresAt DateTime
+  @@index([expiresAt, inStock, suspicious])
+}
+model MarketPriceSnapshot {
+  fingerprint String
+  productId String?
+  product MarketProduct? @relation(fields: [productId], references: [id])
+  @@index([productId, checkedAt])
+  id String @id @default(uuid())
+  listingId String
+  listing MarketListing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  runId String
+  run MarketCrawlRun @relation(fields: [runId], references: [id])
+  priceToman Int
+  shippingToman Int?
+  inStock Boolean
+  suspicious Boolean
+  checkedAt DateTime @default(now())
+  @@unique([listingId, runId])
+  @@index([listingId, checkedAt])
+  @@index([checkedAt])
+}
+model MarketCrawlRun {
+  id String @id @default(uuid())
+  sourceId String
+  source MarketSource @relation(fields: [sourceId], references: [id])
+  status MarketRunStatus @default(QUEUED)
+  requestedBy String
+  cursor String?
+  pages Int @default(0)
+  processed Int @default(0)
+  errors Int @default(0)
+  startedAt DateTime?
+  finishedAt DateTime?
+  heartbeatAt DateTime?
+  createdAt DateTime @default(now())
+  logs MarketCrawlLog[]
+  snapshots MarketPriceSnapshot[]
+  @@index([sourceId, status])
+  @@index([status, createdAt])
+  @@index([createdAt])
+}
+// Public reference quotes are not individual shop offers or verified stock.
+model MarketDiscoveryQuery {
+  seedUrl String? @unique
+  active Boolean @default(false)
+  generation Int @default(0)
+  intervalMinutes Int @default(360)
+  maxScrolls Int @default(1000)
+  maxProducts Int @default(10000)
+  scrollWaitMs Int @default(2000)
+  idleRounds Int @default(8)
+  limitReached Boolean @default(false)
+  links TorobCrawlLink[]
+  id String @id @default(uuid())
+  key String @unique
+  query String
+  category String @default("")
+  status String @default("QUEUED")
+  nextRunAt DateTime @default(now())
+  fetchedAt DateTime?
+  lastError String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  results MarketDiscoveryResult[]
+  @@index([status, nextRunAt])
+}
+model MarketReferencePrice {
+  productId String? @unique
+  product MarketProduct? @relation(fields:[productId],references:[id])
+  metadata Json @default("{}")
+  torobOffers TorobOffer[]
+  id String @id @default(uuid())
+  source String @default("TOROB")
+  externalId String
+  title String
+  searchText String
+  url String
+  priceToman Int?
+  suspicious Boolean @default(false)
+  checkedAt DateTime
+  expiresAt DateTime
+  results MarketDiscoveryResult[]
+  history MarketReferenceSnapshot[]
+  @@unique([source, externalId])
+  @@index([expiresAt, suspicious, priceToman])
+}
+model TorobCrawlLink {
+  id String @id @default(uuid())
+  queryId String
+  query MarketDiscoveryQuery @relation(fields:[queryId],references:[id],onDelete:Cascade)
+  externalId String
+  url String
+  generation Int
+  status String @default("PENDING")
+  attempts Int @default(0)
+  lastError String?
+  fetchedAt DateTime?
+  updatedAt DateTime @updatedAt
+  @@unique([queryId,externalId])
+  @@index([queryId,generation,status])
+}
+model TorobOffer {
+  id String @id @default(uuid())
+  referenceId String
+  reference MarketReferencePrice @relation(fields:[referenceId],references:[id],onDelete:Cascade)
+  externalId String
+  sellerKey String
+  sellerName String
+  url String
+  priceToman Int
+  available Boolean?
+  condition String?
+  priceValidUntil DateTime?
+  expiresAt DateTime
+  checkedAt DateTime
+  @@unique([referenceId,externalId])
+  @@index([referenceId,available,expiresAt,priceToman])
+}
+model MarketProductCompatibility {
+  id String @id @default(uuid())
+  productId String
+  product MarketProduct @relation(fields:[productId],references:[id],onDelete:Cascade)
+  carId String
+  car MarketCar @relation(fields:[carId],references:[id])
+  confidence String
+  evidenceUrl String
+  evidenceText String
+  yearFrom Int?
+  yearTo Int?
+  checkedAt DateTime
+  expiresAt DateTime
+  @@unique([productId,carId])
+  @@index([carId,expiresAt])
+}
+model MarketCompatibilityRule {
+  id String @id @default(uuid())
+  name String
+  category String
+  carKeys String[]
+  requirements Json
+  evidenceUrl String
+  verified Boolean @default(false)
+  checkedAt DateTime
+  expiresAt DateTime
+  @@index([category,verified,expiresAt])
+}
+model MarketDiscoveryResult {
+  queryId String
+  query MarketDiscoveryQuery @relation(fields:[queryId], references:[id], onDelete:Cascade)
+  referenceId String
+  reference MarketReferencePrice @relation(fields:[referenceId], references:[id], onDelete:Cascade)
+  rank Int
+  seenAt DateTime
+  @@id([queryId, referenceId])
+  @@index([referenceId])
+}
+model MarketReferenceSnapshot {
+  id String @id @default(uuid())
+  referenceId String
+  reference MarketReferencePrice @relation(fields:[referenceId], references:[id], onDelete:Cascade)
+  runKey String
+  priceToman Int
+  checkedAt DateTime
+  @@unique([referenceId, runKey])
+  @@index([referenceId, checkedAt])
+  @@index([checkedAt])
+}
+model MarketCrawlLog {
+  id String @id @default(uuid())
+  runId String
+  run MarketCrawlRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  level String
+  code String
+  message String
+  createdAt DateTime @default(now())
+  @@index([runId, createdAt])
+}
+model MarketAlert {
+  id String @id @default(uuid())
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  productId String
+  product MarketProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
+  targetToman Int
+  notifyStock Boolean @default(false)
+  sms Boolean @default(false)
+  active Boolean @default(true)
+  lastEligible Boolean @default(false)
+  lastInStock Boolean @default(false)
+  cycle Int @default(0)
+  createdAt DateTime @default(now())
+  notifications MarketNotification[]
+  @@unique([userId, productId])
+  @@index([active, productId])
+}
+model MarketNotification {
+  id String @id @default(uuid())
+  alertId String
+  alert MarketAlert @relation(fields: [alertId], references: [id], onDelete: Cascade)
+  cycle Int
+  title String
+  body String
+  readAt DateTime?
+  smsState String @default("NOT_REQUESTED")
+  smsAttempts Int @default(0)
+  createdAt DateTime @default(now())
+  @@unique([alertId, cycle])
+  @@index([smsState, createdAt])
+}
+
+model MarketDailyPrice {
+  id String @id @default(uuid())
+  productId String
+  product MarketProduct @relation(fields: [productId], references: [id])
+  listingId String
+  day DateTime @db.Date
+  minToman Int
+  maxToman Int
+  avgToman Int
+  samples Int
+  @@unique([productId, listingId, day])
+  @@index([productId, day])
+}
+model MarketAuditLog {
+  id String @id @default(uuid())
+  actor String
+  action String
+  entityId String
+  note String
+  createdAt DateTime @default(now())
+  @@index([entityId, createdAt])
 }

@@ -1,6 +1,4 @@
 const { HttpError } = require('./domain');
-const CARD_NUMBER = '6219861435789192';
-const ACCOUNT_NAME = 'حساب خودرو چاره';
 function splitAmount(service, serviceToman, partsToman = 0) {
   if (!['REPAIR', 'TOWING'].includes(service)) throw new HttpError(400, 'Unsupported payment service');
   const amountToman = serviceToman + partsToman;
@@ -28,7 +26,7 @@ function createPayments(prisma) {
       if (request.priceToman == null) throw new HttpError(409, 'Final service amount requires agreement');
       if (request.service === 'REPAIR' && request.partsApprovedToman == null) throw new HttpError(409, 'Parts quote must be approved before payment');
       const amounts = splitAmount(request.service, request.priceToman, request.partsApprovedToman || 0);
-      return tx.payment.create({ data: { requestId, ...amounts, cardNumber: CARD_NUMBER, accountName: ACCOUNT_NAME }, include: { attempts: true } });
+      return tx.payment.create({ data: { requestId, ...amounts }, include: { attempts: true } });
     });
   }
   async function submit(requestId, customerId, input) {
@@ -63,4 +61,4 @@ function createPayments(prisma) {
   }
   return { getOrCreate, submit, review };
 }
-module.exports = { createPayments, splitAmount, lockRequest, settleEarning, CARD_NUMBER, ACCOUNT_NAME };
+module.exports = { createPayments, splitAmount, lockRequest, settleEarning };

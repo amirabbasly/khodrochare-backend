@@ -22,6 +22,7 @@ function registerMonitoring({ app, prisma, redis, config, auth, limit, geocoder 
   };
   app.delete('/api/v1/admin/session', admin, async (req, res) => { await redis.del(`admin:session:${d.hash(req.adminToken)}`); res.status(204).end(); });
   app.get('/api/v1/admin/overview', admin, async (req, res) => res.json(await overview(prisma, config.LOCATION_MAX_AGE_SECONDS)));
+  require('./market/routes').registerMarket({app,prisma,redis,config,auth,admin,limit});
   app.patch('/api/v1/me', auth, async (req, res) => {
     const input = z.object({ fullName: z.string().trim().min(3).max(150) }).strict().parse(req.body);
     const updated = await prisma.user.update({ where: { id: req.user.id }, data: input, include: { vehicles: true } });

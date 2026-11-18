@@ -1,6 +1,20 @@
 require('dotenv').config({ quiet: true });
 const { z } = require('zod');
 const config = z.object({
+  ZARINPAL_MODE: z.enum(['sandbox','live']).default('sandbox'),
+  ZARINPAL_MERCHANT_ID: z.string().default(''),
+  PAYMENT_CALLBACK_URL: z.string().url().default('https://api.khodrochare.ir/api/v1/payments/zarinpal/callback'),
+  CUSTOMER_APP_URL: z.string().url().default('https://app.khodrochare.ir'),
+  DRIVER_APP_URL: z.string().url().default('https://driver.khodrochare.ir'),
+  TOROB_CHROME_PATH:z.string().default(process.platform==='win32'?'C:/Program Files/Google/Chrome/Application/chrome.exe':'/usr/bin/chromium'),
+  TOROB_BROWSER_NO_SANDBOX:z.enum(['true','false']).default('false').transform(v=>v==='true'),
+  TOROB_SCAN_TIMEOUT_MS:z.coerce.number().int().min(10000).max(7200000).default(1800000),
+  TOROB_PRICE_TTL_HOURS:z.coerce.number().int().min(1).max(72).default(24),
+  TOROB_INITIAL_CATEGORY_URL:z.string().url().default('https://torob.com/browse/541/باتری-خودرو-battery/'),
+  MARKET_RAW_RETENTION_DAYS: z.coerce.number().int().min(30).max(3650).default(180),
+  MARKET_ARCHIVE_RETENTION_DAYS: z.coerce.number().int().min(365).max(7300).default(1095),
+  MARKET_SMS_URL: z.string().url().optional(),
+  MARKET_SMS_TOKEN: z.string().optional(),
   ADMIN_USERNAME: z.string().default('admin'),
   ADMIN_PASSWORD_HASH: z.string().default(''),
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
