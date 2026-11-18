@@ -26,7 +26,7 @@ docker compose logs --tail=100 api market-worker
 از ریشه سه اپ:
 
 ```sh
-docker compose -f compose.market.yaml up -d --build
+docker compose -f compose.market.yaml up -d --build customer driver
 ```
 
 Migration `202611180002_torob_native` ساختار جدید را اضافه می‌کند. قبل از ارتقای دیتابیس موجود بک‌آپ بگیرید. API، PostgreSQL/PostGIS، Redis و Worker با Compose اجرا می‌شوند؛ ساخت دستی دیتابیس لازم نیست. Chromium و فونت فارسی در Dockerfile نصب می‌شوند. نصب محلی Node یا Chrome روی سرور لازم نیست.
@@ -43,25 +43,21 @@ TOROB_INITIAL_CATEGORY_URL=https://torob.com/browse/541/باتری-خودرو-ba
 
 Chrome داخل کانتینر محدود Worker اجرا می‌شود؛ این سرویس پورت عمومی ندارد. `TOROB_BROWSER_NO_SANDBOX` برای محیط کانتینری است؛ روی میزبان دارای sandbox قابل استفاده، false بگذارید. مقادیر قدیمی `MARKET_TOROB_*` دیگر استفاده نمی‌شوند. شماره کارت و تنظیمات زرین‌پال با این تغییر دست‌کاری نشده‌اند.
 
-## تنظیم لینک دستی
+## تنظیم لینک دستی بدون ادمین
 
-ورودی نمونه API ادمین، با نشست ادمین:
+تنظیمات منابع اکنون از `.env` خوانده می‌شوند؛ راهنمای فعلی و دستورات دقیق استقرار: [جمعه‌بازار بدون پنل ادمین](ENV-DEPLOYMENT.md).
 
-```json
-{
-  "name": "باتری خودرو",
-  "url": "https://torob.com/browse/541/باتری-خودرو-battery/",
-  "category": "batteries",
-  "active": true,
-  "intervalMinutes": 360,
-  "maxScrolls": 1000,
-  "maxProducts": 10000,
-  "scrollWaitMs": 2000,
-  "idleRounds": 8
-}
+```dotenv
+TOROB_ENABLED=true
+TOROB_SOURCES_JSON='[{"name":"باتری خودرو","url":"https://torob.com/browse/541/","category":"batteries","active":true}]'
+TOROB_INTERVAL_MINUTES=360
+TOROB_MAX_SCROLLS=1000
+TOROB_MAX_PRODUCTS=10000
 ```
 
-`POST /api/v1/admin/market/sources` برای ثبت و `PUT /sources/:id` برای ویرایش است. لینک سایر سایت‌ها، لینک جست‌وجو، HTTP و URL دارای نام کاربری/رمز رد می‌شود. فقط لینک `/browse/` دامنه ترب پذیرفته می‌شود. دکمه «شروع دریافت» یک نوبت جدید را صف‌بندی می‌کند؛ «توقف ورودی» مرورگر و کارهای همان نسل را متوقف می‌کند.
+فهرست چندمنبعی JSON مرجع تنظیمات است؛ حذف منبع از آن، منبع را غیرفعال می‌کند و داده‌های تاریخی باقی می‌مانند. در نبود JSON، لینک اولیه `TOROB_INITIAL_CATEGORY_URL` استفاده می‌شود. پس از ویرایش env، کانتینر Worker را بازآفرینی کنید؛ دریافت خودکار آغاز می‌شود. cooldown ترب با راه‌اندازی مجدد پاک نمی‌شود. `TOROB_COMPATIBILITY_RULES_JSON` برای قواعد فنی مستند اختیاری است.
+
+مسیر مستقیم `/market` در هر دو اپ مشتری و امدادگر اضافه شده است. مسیر داشبورد `/home` و دکمه‌های موجود نیز حفظ شده‌اند. برای این روش نیازی به انتشار یا ورود پنل ادمین نیست.
 
 ## کامل، ناقص و محدودشده
 

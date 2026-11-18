@@ -2,7 +2,7 @@ const {hash,HttpError}=require('../../domain');
 const {normalize}=require('../domain');
 const {categoryRows,bootstrapCatalog}=require('./catalog');
 const {applyCompatibility}=require('./compatibility');
-const {torobUrl}=require('./urls');
+const {readSettings,syncSettings}=require('./env-settings');
 const DEFAULT_SEED='https://torob.com/browse/541/باتری-خودرو-battery/';
 async function categoriesFromBreadcrumbs(tx,parsed,fallback){
   let parent=await tx.marketCategory.findUnique({where:{slug:'auto-parts'}}),selected=null;
@@ -17,9 +17,9 @@ async function categoriesFromBreadcrumbs(tx,parsed,fallback){
 }
 function createTorobService(prisma,config){
   async function bootstrap(){
+    const settings=readSettings(config);
     await bootstrapCatalog(prisma);
-    const seed=torobUrl(config.TOROB_INITIAL_CATEGORY_URL||DEFAULT_SEED,'browse');
-    await prisma.marketDiscoveryQuery.upsert({where:{key:hash('torob-browse:'+seed.id)},create:{key:hash('torob-browse:'+seed.id),query:'باتری خودرو',category:'batteries',seedUrl:seed.url,active:true},update:{}});
+    return syncSettings(prisma,settings);
   }
   async function ingest(seed,parsed,runKey){
     return prisma.$transaction(async tx=>{

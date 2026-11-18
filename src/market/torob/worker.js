@@ -3,10 +3,11 @@ const {collectLinks,source}=require('./browser');
 const {parseProduct}=require('./parser');
 const {createTorobService}=require('./service');
 const {createMarketService}=require('../service');
+const {enqueuePending}=require('./queue');
 function startTorob({prisma,redis,network,config,log}){
   const service=createTorobService(prisma,config),alerts=createMarketService(prisma);
   const scans=new Queue('torob-browse-v2',{connection:redis}),products=new Queue('torob-product-v2',{connection:redis});
-  let closing=false,bootstrapped=false;
+  let closing=false,bootstrapped=false,lastStatusAt=0;
   async function failed(seed,error){
     const code=/^[A-Z0-9_]+$/.test(error.message)?error.message:'TOROB_CRAWL_FAILED';
     const terminal=['SOURCE_CHALLENGE','SOURCE_ACCESS_DENIED','ROBOTS_DISALLOWED','SOURCE_BACKOFF_ACTIVE','SOURCE_RATE_LIMITED'].includes(code);
@@ -14,15 +15,17 @@ function startTorob({prisma,redis,network,config,log}){
     const wait=Math.max(terminal?21600000:900000,ttl);
     if(terminal)await redis.set('market:backoff:torob-native','1','PX',wait);
     await prisma.marketDiscoveryQuery.updateMany({where:{id:seed.id,active:true,generation:seed.generation},data:{status:terminal?'BLOCKED':'FAILED',lastError:code,nextRunAt:new Date(Date.now()+wait)}});
-    log('torob_failure',{seedId:seed.id,code});return code;
+    log('torob_failure',{seedId:seed.id,code,httpStatus:error.httpStatus,url:error.url,stage:error.stage,retryAfterSeconds:Math.ceil(wait/1000),nextRunAt:new Date(Date.now()+wait).toISOString()});return code;
   }
   const scanWorker=new Worker('torob-browse-v2',async job=>{
+    if(config.TOROB_ENABLED===false)return;
     const current=await prisma.marketDiscoveryQuery.findUnique({where:{id:job.data.id}});
     if(!current?.active||!current.seedUrl||current.nextRunAt.toISOString()!==job.data.scheduledAt)return;
     const token=String(job.id),lease='market:torob:browser-lease';if(!await redis.set(lease,token,'EX',120,'NX')){await prisma.marketDiscoveryQuery.update({where:{id:current.id},data:{nextRunAt:new Date(Date.now()+30000)}});return;}
     let seed;
     try{
       seed=await prisma.marketDiscoveryQuery.update({where:{id:current.id},data:{status:'RUNNING',generation:{increment:1},lastError:null,limitReached:false}});
+      log('torob_scan_started',{seedId:seed.id,generation:seed.generation});
       const result=await collectLinks({seed,config,network,
         shouldStop:async()=>{
           if(closing)return true;
@@ -40,6 +43,7 @@ function startTorob({prisma,redis,network,config,log}){
     finally{await redis.eval("if redis.call('GET',KEYS[1])==ARGV[1] then return redis.call('DEL',KEYS[1]) end; return 0",1,lease,token);}
   },{connection:redis,concurrency:1});
   const productWorker=new Worker('torob-product-v2',async job=>{
+    if(config.TOROB_ENABLED===false)return;
     const link=await prisma.torobCrawlLink.findUnique({where:{id:job.data.id},include:{query:true}});
     if(!link||!link.query.active||link.query.status!=='FETCHING'||link.generation!==job.data.generation||link.query.generation!==link.generation||link.status!=='PENDING')return;
     const claimed=await prisma.torobCrawlLink.updateMany({where:{id:link.id,status:'PENDING',generation:link.generation},data:{status:'FETCHING',attempts:{increment:1}}});if(!claimed.count)return;
@@ -58,7 +62,13 @@ function startTorob({prisma,redis,network,config,log}){
   },{connection:redis,concurrency:2});
   for(const worker of[scanWorker,productWorker]){worker.on('error',e=>log('torob_queue_error',{code:e.code||e.name}));worker.on('failed',(job,e)=>log('torob_job_failed',{jobId:job?.id,code:e.message}));}
   async function schedule(){
-    if(!bootstrapped){await service.bootstrap();bootstrapped=true;}
+    if(!bootstrapped){const settings=await service.bootstrap();bootstrapped=true;log('torob_env_configured',settings);}
+    if(Date.now()-lastStatusAt>=60000){
+      const backoffMs=Math.max(0,await redis.pttl('market:backoff:torob-native'));
+      const sources=await prisma.marketDiscoveryQuery.groupBy({by:['status','active'],where:{seedUrl:{not:null}},_count:true});
+      log('torob_scheduler_status',{enabled:config.TOROB_ENABLED!==false,backoffSeconds:Math.ceil(backoffMs/1000),sources});lastStatusAt=Date.now();
+    }
+    if(config.TOROB_ENABLED===false)return;
     await prisma.marketDiscoveryQuery.updateMany({where:{active:true,status:'RUNNING',updatedAt:{lt:new Date(Date.now()-180000)}},data:{status:'QUEUED',nextRunAt:new Date()}});
     await prisma.torobCrawlLink.updateMany({where:{status:'FETCHING',updatedAt:{lt:new Date(Date.now()-180000)}},data:{status:'PENDING'}});
     if(await redis.pttl('market:backoff:torob-native')>0)return;
@@ -75,7 +85,7 @@ function startTorob({prisma,redis,network,config,log}){
     const fetching=await prisma.marketDiscoveryQuery.findMany({where:{active:true,status:'FETCHING'},take:100});
     for(const seed of fetching){
       const pending=await prisma.torobCrawlLink.findMany({where:{queryId:seed.id,generation:seed.generation,status:'PENDING'},take:100});
-      for(const link of pending)await products.add('product',{id:link.id,generation:link.generation},{jobId:link.id+'-'+link.generation+'-'+link.attempts,attempts:1,removeOnComplete:{age:86400},removeOnFail:{age:604800}});
+      for(const link of pending)await enqueuePending(products,'product',{id:link.id,generation:link.generation},{jobId:link.id+'-'+link.generation+'-'+link.attempts,attempts:1,removeOnComplete:{age:86400},removeOnFail:{age:604800}});
       const remaining=await prisma.torobCrawlLink.count({where:{queryId:seed.id,generation:seed.generation,status:{in:['PENDING','FETCHING']}}});
       if(!remaining){const errors=await prisma.torobCrawlLink.count({where:{queryId:seed.id,generation:seed.generation,status:'FAILED'}});await prisma.marketDiscoveryQuery.update({where:{id:seed.id},data:{status:seed.limitReached||errors?'PARTIAL':'READY',fetchedAt:new Date(),lastError:errors?'SOME_PRODUCTS_FAILED':seed.limitReached?'SCAN_LIMIT_REACHED':null}});}
     }

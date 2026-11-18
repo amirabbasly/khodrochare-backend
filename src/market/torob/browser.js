@@ -12,10 +12,11 @@ async function collectLinks({seed,config,network,onLinks,shouldStop=async()=>fal
   const target=torobUrl(seed.seedUrl,'browse');
   await network.checkRobots(target.url,source);
   const browser=await(launch||require('puppeteer-core').launch)({executablePath:executablePath(config),headless:true,defaultViewport:{width:1440,height:900},args:config.TOROB_BROWSER_NO_SANDBOX?['--no-sandbox','--disable-setuid-sandbox']:[]});
-  const controller=new AbortController(),links=new Map();let scrolls=0,idle=0,complete=false,policyError=null;
+  const controller=new AbortController(),links=new Map();let scrolls=0,idle=0,complete=false,policyError=null,policyDetails={};
+  const failure=code=>Object.assign(new Error(code),policyDetails);
   try{
     const page=await browser.newPage();await page.setUserAgent((await browser.userAgent())+' KhodrochareMarketBot/2.0');
-    page.on('response',response=>{try{const url=new URL(response.url()),status=response.status(),dataPath=url.hostname==='torob.com'&&url.pathname.startsWith('/browse/'+target.id+'/')||url.hostname==='api.torob.com'&&/^\/v4\/base-product\/(search|details)/.test(url.pathname);if(['torob.com','api.torob.com'].includes(url.hostname)&&([429,490].includes(status)||dataPath&&[401,403].includes(status)))policyError=status===490?'SOURCE_CHALLENGE':status===429?'SOURCE_RATE_LIMITED':'SOURCE_ACCESS_DENIED';}catch{/* Ignore non-URL browser internals. */}});
+    page.on('response',response=>{try{const url=new URL(response.url()),status=response.status(),dataPath=url.hostname==='torob.com'&&url.pathname.startsWith('/browse/'+target.id+'/')||url.hostname==='api.torob.com'&&/^\/v4\/base-product\/(search|details)/.test(url.pathname);if(['torob.com','api.torob.com'].includes(url.hostname)&&([429,490].includes(status)||dataPath&&[401,403].includes(status))){policyError=status===490?'SOURCE_CHALLENGE':status===429?'SOURCE_RATE_LIMITED':'SOURCE_ACCESS_DENIED';policyDetails={httpStatus:status,url:url.origin+url.pathname,stage:'browser'};}}catch{/* Ignore non-URL browser internals. */}});
     await page.setRequestInterception(true);
     page.on('request',request=>{void(async()=>{
       try{
@@ -29,15 +30,15 @@ async function collectLinks({seed,config,network,onLinks,shouldStop=async()=>fal
       }catch(error){if(error.message!=='ROBOTS_DISALLOWED'||request.isNavigationRequest())policyError=error.message;if(!request.isInterceptResolutionHandled())await request.abort();}
     })().catch(()=>{});});
     const response=await page.goto(target.url,{waitUntil:'domcontentloaded',timeout:60000});
-    if([401,403,429,490].includes(response?.status()))throw new Error(response.status()===490?'SOURCE_CHALLENGE':'SOURCE_ACCESS_DENIED');
+    if([401,403,429,490].includes(response?.status())){policyDetails={httpStatus:response.status(),url:target.url,stage:'browser-navigation'};throw failure(response.status()===490?'SOURCE_CHALLENGE':response.status()===429?'SOURCE_RATE_LIMITED':'SOURCE_ACCESS_DENIED');}
     if(!response?.ok())throw new Error('TOROB_CATEGORY_UNAVAILABLE');
     if(challenge(await page.content()))throw new Error('SOURCE_CHALLENGE');
-    try{await page.waitForSelector('[data-testid="product-card"], a[href^="/p/"]',{timeout:30000});}catch{if(challenge(await page.content()))throw new Error('SOURCE_CHALLENGE');throw new Error(policyError||'TOROB_PRODUCT_CARDS_NOT_FOUND');}
+    try{await page.waitForSelector('[data-testid="product-card"], a[href^="/p/"]',{timeout:30000});}catch{if(challenge(await page.content()))throw new Error('SOURCE_CHALLENGE');throw failure(policyError||'TOROB_PRODUCT_CARDS_NOT_FOUND');}
     const started=Date.now();
     for(;;){
       if(await shouldStop())throw new Error('TOROB_SCAN_CANCELLED');
       if(Date.now()-started>config.TOROB_SCAN_TIMEOUT_MS)break;
-      if(policyError)throw new Error(policyError);
+      if(policyError)throw failure(policyError);
       if(challenge(await page.content()))throw new Error('SOURCE_CHALLENGE');
       const found=await page.evaluate(()=>Array.from(document.querySelectorAll('a[href*="/p/"]')).map(a=>a.href));
       const added=[];

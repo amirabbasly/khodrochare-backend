@@ -5,6 +5,55 @@ const {batterySpecs,ruleMatches,carMentions}=require('../src/market/torob/compat
 const {collectLinks}=require('../src/market/torob/browser');
 const fixture=fs.readFileSync(require.resolve('./fixtures/market/torob-product.html'),'utf8');
 const productUrl='https://torob.com/p/c2a29e6f-b706-4695-ba9c-13767a09e807/battery/';
+const {readSettings,syncSettings}=require('../src/market/torob/env-settings');
+
+test('pending links can resume after a skipped BullMQ job without duplicating active jobs',async()=>{
+  const{enqueuePending}=require('../src/market/torob/queue');let added=0,removed=0,state='completed';
+  const queue={getJob:async()=>({getState:async()=>state,remove:async()=>removed++}),add:async()=>added++};
+  await enqueuePending(queue,'product',{}, {jobId:'pending'});assert.equal(removed,1);assert.equal(added,1);
+  state='active';await enqueuePending(queue,'product',{}, {jobId:'pending'});assert.equal(removed,1);assert.equal(added,1);
+  state='failed';await enqueuePending(queue,'product',{}, {jobId:'pending'});assert.equal(removed,2);assert.equal(added,2);
+});
+
+test('env config supports legacy URL, multiple sources, global defaults and explicit overrides',()=>{
+  assert.equal(readSettings({}).sources[0].seedUrl,'https://torob.com/browse/541/');
+  const result=readSettings({TOROB_MAX_PRODUCTS:30,TOROB_SOURCES_JSON:JSON.stringify([
+    {name:'Battery',url:'https://torob.com/browse/541/',category:'batteries'},
+    {name:'Electrical',url:'https://torob.com/browse/3298/',maxProducts:5,active:false},
+  ])});
+  assert.equal(result.sources.length,2);assert.equal(result.sources[0].maxProducts,30);
+  assert.equal(result.sources[1].maxProducts,5);assert.equal(result.sources[1].active,false);
+  assert.equal(readSettings({TOROB_ENABLED:false}).sources[0].active,false);
+  assert.deepEqual(readSettings({TOROB_SOURCES_JSON:'[]'}).sources,[]);
+});
+
+test('invalid env sources and unsafe or incomplete compatibility rules fail before syncing',()=>{
+  for(const value of ['not json','{}','[{"name":"Bad","url":"https://other.ir/browse/541/"}]','[{"name":"Bad","url":"https://torob.com/browse/541/","maxProducts":0}]'])assert.throws(()=>readSettings({TOROB_SOURCES_JSON:value}));
+  const rule={name:'Battery rule',category:'batteries',carKeys:['car'],requirements:{capacityAh:60},evidenceUrl:'https://manufacturer.ir/spec',verified:true,checkedAt:new Date().toISOString(),expiresAt:new Date(Date.now()+86400000).toISOString()};
+  assert.throws(()=>readSettings({TOROB_COMPATIBILITY_RULES_JSON:JSON.stringify([rule])}),/INCOMPLETE_BATTERY/);
+  assert.throws(()=>readSettings({TOROB_COMPATIBILITY_RULES_JSON:JSON.stringify([{...rule,verified:false,evidenceUrl:'http://manufacturer.ir/spec'}])}),/INVALID_EVIDENCE/);
+});
+
+test('env sync preserves unchanged cooldowns, applies edits, retires omitted sources without deleting data',async()=>{
+  const calls=[];let previous;
+  const tx={$queryRaw:async()=>[],marketCategory:{findUnique:async()=>({id:'category'})},marketDiscoveryQuery:{
+    findUnique:async()=>previous,
+    updateMany:async input=>{calls.push(['retire',input]);return{count:0};},
+    upsert:async input=>{calls.push(['upsert',input]);return input.create;},
+  }};
+  const prisma={$transaction:fn=>fn(tx)},settings=readSettings({});
+  previous={...settings.sources[0],status:'BLOCKED',generation:9,nextRunAt:new Date(Date.now()+21600000)};
+  await syncSettings(prisma,settings);assert.deepEqual(calls.at(-1)[1].update,{});
+  settings.sources[0].maxProducts=25;await syncSettings(prisma,settings);
+  assert.equal(calls.at(-1)[1].update.generation.increment,1);assert.equal(calls.at(-1)[1].update.status,'QUEUED');
+  await syncSettings(prisma,{sources:[],rules:null});
+  assert.equal(calls.at(-1)[1].data.active,false);assert.equal(calls.at(-1)[1].data.status,'CANCELLED');
+});
+
+test('unknown env categories are rejected before existing source state is changed',async()=>{
+  const tx={$queryRaw:async()=>[],marketCategory:{findUnique:async()=>null},marketDiscoveryQuery:{updateMany:async()=>assert.fail('must not mutate sources')}};
+  await assert.rejects(syncSettings({$transaction:fn=>fn(tx)},readSettings({})),/UNKNOWN_CATEGORY/);
+});
 test('provided Torob HTML yields real structured prices, brand, image and individual offers in toman',()=>{
   const result=parseProduct(fixture,productUrl);assert.equal(result.name,'باتری اتمی صبا ۵۰ آمپر قالب L1 قطب چپ');assert.equal(result.brand,'صبا');assert.equal(result.minPriceToman,4100000);assert.equal(result.maxPriceToman,7565800);assert.equal(result.offers.length,6);assert.equal(result.offers[1].priceToman,4100000);assert.equal(result.offers[1].available,true);assert.equal(result.images.length,1);assert.ok(result.categories.some(c=>c.torobId==='541'));
   assert.equal(new URL(result.offers[0].url).searchParams.has('session_id'),false);
@@ -53,6 +102,14 @@ test('reaching a scroll/product budget is partial, never reported as complete',a
 });
 test('a challenge stops browser collection and still closes the browser',async()=>{
   const browser=fakeBrowser(490);await assert.rejects(collectLinks({seed,config,network:{checkRobots:async()=>({})},onLinks:async()=>assert.fail(),launch:browser.launch}),/SOURCE_CHALLENGE/);assert.equal(browser.closed(),true);
+});
+
+test('browser failures retain HTTP status and stage, and classify 429 as a rate limit',async()=>{
+  for(const[status,code]of[[401,'SOURCE_ACCESS_DENIED'],[403,'SOURCE_ACCESS_DENIED'],[429,'SOURCE_RATE_LIMITED']]){
+    const browser=fakeBrowser(status);
+    await assert.rejects(collectLinks({seed,config,network:{checkRobots:async()=>({})},onLinks:async()=>assert.fail(),launch:browser.launch}),error=>error.message===code&&error.httpStatus===status&&error.stage==='browser-navigation'&&error.url===seed.seedUrl);
+    assert.equal(browser.closed(),true);
+  }
 });
 test('native catalog contains sourced vehicle models and a hierarchy of automotive categories',()=>{
   const{carRows,categoryRows}=require('../src/market/torob/catalog');assert.ok(carRows().length>=50);assert.ok(categoryRows.length>=40);assert.ok(carRows().every(c=>c.aliases.length&&c.maker&&c.model&&c.trim));assert.ok(categoryRows.find(c=>c[0]==='batteries'&&c[3]==='541'));

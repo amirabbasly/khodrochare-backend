@@ -71,7 +71,8 @@ function createNetwork(redis,transport={}) {
           const seconds=Number(retry)||Math.max(0,Math.ceil((Date.parse(retry)-Date.now())/1000))||0;
           const wait=Math.min(86400,Math.max(seconds,response.statusCode===490?21600:response.statusCode===429?900:3600));
           const code=response.statusCode===490?'SOURCE_CHALLENGE':response.statusCode===429?'SOURCE_RATE_LIMITED':'SOURCE_ACCESS_DENIED';
-          redis.set(`market:backoff:${source.id}`,'1','EX',wait).then(()=>reject(new Error(code)),reject);return;
+          const error=Object.assign(new Error(code),{httpStatus:response.statusCode,url:target.url.origin+target.url.pathname,stage:'http'});
+          redis.set(`market:backoff:${source.id}`,'1','EX',wait).then(()=>reject(error),reject);return;
         }
         if (response.statusCode===404) { response.resume(); resolve({status:404,text:'',headers:response.headers}); return; }
         if (!(response.statusCode===200 || (method==='POST'&&[201,202].includes(response.statusCode)))) { response.resume(); const e=new Error(`HTTP_${response.statusCode}`); const retry=response.headers['retry-after']; e.retryAfter=Math.min(3600,Number(retry)||Math.max(0,Math.ceil((Date.parse(retry)-Date.now())/1000))||0); if(e.retryAfter>0)redis.set(`market:backoff:${source.id}`,'1','EX',e.retryAfter).then(()=>reject(e),reject);else reject(e); return; }
