@@ -10,7 +10,7 @@ function registerMarket({app,prisma,redis,auth,admin,limit,config}){
     const p=z.object({productId:z.string().uuid(),targetToman:z.number().int().min(1).max(2147483647),sms:z.boolean().default(false),notifyStock:z.boolean().default(false)}).strict().parse(req.body);await published(p.productId);
     if(p.sms&&(!config.MARKET_SMS_URL||!config.MARKET_SMS_TOKEN))throw new HttpError(409,'SMS provider not configured');
     const result=await prisma.$transaction(async tx=>{
-      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${req.user.id}),hashtext(${p.productId}))`;
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${req.user.id}),hashtext(${p.productId}))::text AS locked`;
       const key={userId_productId:{userId:req.user.id,productId:p.productId}};
       const existing=await tx.marketAlert.findUnique({where:key});
       if(existing?.active&&existing.targetToman===p.targetToman&&existing.sms===p.sms&&existing.notifyStock===p.notifyStock)return existing;

@@ -20,7 +20,7 @@ function createGatewayPayments(prisma,config,provider=createZarinpal(config)){
         if(current.status==='VERIFIED'||provider.mode==='sandbox'&&current.status==='SANDBOX_VERIFIED')throw new HttpError(409,'Payment is already verified');
         if(current.status==='SUBMITTED')throw new HttpError(409,'Legacy payment requires review');
       }
-      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${user.id}),hashtext(${input.idempotencyKey}))`;
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${user.id}),hashtext(${input.idempotencyKey}))::text AS locked`;
       const existing=await tx.gatewayCheckout.findUnique({where:{userId_idempotencyKey:{userId:user.id,idempotencyKey:input.idempotencyKey}}});
       if(existing){if(existing.amountToman!==amountToman||existing.paymentId!==(payment?.id||null)||existing.mode!==provider.mode)throw new HttpError(409,'Payment attempt changed');return existing;}
       if(payment){

@@ -4,12 +4,11 @@
 
 ## مسیرهای فرانت
 
-- مشتری: `https://app.khodrochare.ir/market`
-- امدادگر: `https://driver.khodrochare.ir/market` (با دامنه واقعی اپ امدادگر جایگزین کنید).
-- دکمه‌های موجود در داشبورد `/home` همچنان همان فروشگاه را باز می‌کنند.
+- مشتری: `https://app.khodrochare.ir/home`؛ دکمه «جمعه‌بازار» داخل داشبورد.
+- امدادگر: `/home` روی دامنه اپ امدادگر؛ بخش «خرید لوازم یدکی».
 - API عمومی: `https://api.khodrochare.ir/api/v1/market/products?limit=1`؛ بدون احراز هویت.
 
-قبلاً صفحه مستقل `/market` در دو اپ وجود نداشت و فروشگاه فقط یک view داخل داشبورد بود. اکنون فایل `src/app/market/page.tsx` در هر دو اپ اضافه شده؛ برای رفع 404 باید تصویر فرانت جدید build و جایگزین شود. تغییر Nginx به‌تنهایی مسیر Next.js ایجاد نمی‌کند.
+صفحه مستقل `/market` طبق درخواست حذف شده است و پاسخ 404 آن طبیعی است. فروشگاه داخل داشبورد باقی است. تنظیمات دریافت از `.env` اعمال می‌شوند و نیازی به پنل ادمین نیست.
 
 ## تنظیمات بک‌اند
 
@@ -102,16 +101,16 @@ docker compose up -d --no-deps --force-recreate market-worker
 cd /opt/khodrochare-application
 PUBLIC_API_URL=https://api.khodrochare.ir/api/v1 docker compose -f compose.market.yaml build customer driver
 docker compose -f compose.market.yaml up -d --no-deps customer driver
-curl -I http://127.0.0.1:3100/market
-curl -I http://127.0.0.1:3101/market
-curl -I https://app.khodrochare.ir/market
+curl -I http://127.0.0.1:3100/home
+curl -I http://127.0.0.1:3101/home
+curl -I https://app.khodrochare.ir/home
 ```
 
 این دستورها ادمین را build یا اجرا نمی‌کنند. اگر فرانت‌ها را با Compose دیگری اجرا کرده‌اید، همان فایل و نام سرویس‌های موجود را استفاده کنید؛ کانتینر موازی با پورت تکراری نسازید. متغیر فرانت `NEXT_PUBLIC_API_BASE_URL` هنگام **build** وارد JS می‌شود؛ فقط تغییر env زمان اجرا کافی نیست. در Compose مخزن، `PUBLIC_API_URL` به این build-arg متصل است. Dockerfileهای هر دو فرانت پیش‌فرض API صحیح دارند. کلیدهای محرمانه بک‌اند را در متغیرهای `NEXT_PUBLIC_*` قرار ندهید.
 
 ## پراکسی
 
-با Compose فرانت موجود، نگاشت‌ها چنین‌اند: دامنه مشتری → `127.0.0.1:3100`، دامنه امدادگر → `127.0.0.1:3101`، API → `127.0.0.1:4000`. روی دامنه اپ، تمام مسیرها از جمله `/market` و `/_next/` باید به همان Next.js پروکسی شوند. روی دامنه API، پیشوند `/api/v1` نباید حذف یا دوبار اضافه شود. `CORS_ORIGINS` بک‌اند باید origin دقیق دو اپ را شامل شود. مقدار فعلی Nginx سرور از این محیط قابل مشاهده نیست.
+با Compose فرانت موجود، نگاشت‌ها چنین‌اند: دامنه مشتری → `127.0.0.1:3100`، دامنه امدادگر → `127.0.0.1:3101`، API → `127.0.0.1:4000`. روی دامنه اپ، تمام مسیرها از جمله `/home` و `/_next/` باید به همان Next.js پروکسی شوند. روی دامنه API، پیشوند `/api/v1` نباید حذف یا دوبار اضافه شود. `CORS_ORIGINS` بک‌اند باید origin دقیق دو اپ را شامل شود. مقدار فعلی Nginx سرور از این محیط قابل مشاهده نیست.
 
 برای بررسی بدون تغییر:
 
@@ -120,7 +119,7 @@ sudo nginx -t
 sudo nginx -T 2>&1 | grep -E 'server_name|location|proxy_pass|try_files'
 ```
 
-اگر localhost هم برای `/market` پاسخ 404 داد، ابتدا تصویر فرانت و فایل route را بررسی کنید. اگر localhost پاسخ صحیح ولی دامنه 404 داد، upstream یا CDN/کش را بررسی کنید. Nginx و Caddy را هم‌زمان روی پورت‌های ۸۰/۴۴۳ اجرا نکنید.
+اگر localhost هم برای `/home` پاسخ 404 داد، ابتدا تصویر فرانت و فایل route را بررسی کنید. اگر localhost پاسخ صحیح ولی دامنه 404 داد، upstream یا CDN/کش را بررسی کنید. Nginx و Caddy را هم‌زمان روی پورت‌های ۸۰/۴۴۳ اجرا نکنید.
 
 ## وضعیت، صف و علت خالی بودن فروشگاه
 
@@ -147,3 +146,9 @@ docker compose logs --since=12h --tail=500 market-worker
 ## اعتبارسنجی انجام‌شده
 
 تست‌های Node و lint/TypeScript دو اپ اجرا می‌شوند؛ گزارش نهایی اجرا را در پاسخ تغییر ببینید. Docker در محیط توسعه فعلی موجود نیست، بنابراین build Docker، migration و تست مرورگر/دیتابیس واقعی این نسخه اجرا نشده‌اند. موفقیت تست‌های کنترل‌شده، تضمین دریافت کامل دسته‌های ترب از IP سرور نیست.
+
+## رفع خطای P2010 / void
+
+`pg_advisory_xact_lock` نوع PostgreSQL `void` برمی‌گرداند. برگرداندن مستقیم آن با `$queryRaw` باعث خطای deserialize و شکست bootstrap پیش از ثبت heartbeat می‌شد. خروجی تمام قفل‌های advisory در کد به `::text AS locked` تبدیل شده است؛ خود قفل تراکنشی و کلیدهای آن تغییر نکرده‌اند. همگام‌سازی env و دریافت محصول هر دو اصلاح شده‌اند؛ migration یا بازنشانی دیتابیس لازم نیست.
+
+پس از انتشار تصویر جدید Worker، heartbeat باید با اجرای موفق Scheduler ثبت شود. `SOURCE_ACCESS_DENIED` مسئله‌ای جداگانه است: تا پایان cooldown، ۲۶ لینک PENDING پردازش نمی‌شوند. در صورت برقراری دسترسی، دریافت خودکار ادامه پیدا می‌کند. این اصلاح نه دسترسی ترب را تضمین می‌کند و نه cooldown یا داده‌های موجود را پاک می‌کند.

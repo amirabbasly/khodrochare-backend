@@ -53,7 +53,7 @@ function readSettings(config) {
 }
 async function syncSettings(prisma, settings) {
   return prisma.$transaction(async tx => {
-    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext('torob-env-settings'))`;
+    await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext('torob-env-settings'))::text AS locked`;
     // Validate every entry before changing an existing source or rule.
     for (const source of settings.sources) {
       if (!await tx.marketCategory.findUnique({ where: { slug: source.category } })) throw new Error('TOROB_ENV_UNKNOWN_CATEGORY');

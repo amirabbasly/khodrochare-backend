@@ -23,7 +23,7 @@ function createTorobService(prisma,config){
   }
   async function ingest(seed,parsed,runKey){
     return prisma.$transaction(async tx=>{
-      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext('torob-product'),hashtext(${parsed.externalId}))`;
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext('torob-product'),hashtext(${parsed.externalId}))::text AS locked`;
       const now=new Date(),expiresAt=new Date(Date.now()+(config.TOROB_PRICE_TTL_HOURS||24)*3600000);
       const category=await categoriesFromBreadcrumbs(tx,parsed,seed.category);if(!category)throw new HttpError(400,'Unknown automotive category');
       const brand=await tx.marketBrand.upsert({where:{key:normalize(parsed.brand)},create:{key:normalize(parsed.brand),name:parsed.brand},update:{}});

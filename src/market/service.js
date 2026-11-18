@@ -36,7 +36,7 @@ function createMarketService(prisma) {
     const sellerDomain = new URL(p.seller.url).hostname.replace(/^www\./,'');
     if (new URL(p.url).hostname.replace(/^www\./,'') !== sellerDomain) throw new HttpError(400, 'Offer URL must belong to its seller');
     return prisma.$transaction(async tx => {
-      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${source.id}),hashtext(${p.externalId}))`;
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${source.id}),hashtext(${p.externalId}))::text AS locked`;
       await tx.$queryRaw`SELECT id FROM "MarketListing" WHERE "sourceId"=${source.id} AND "externalId"=${p.externalId} FOR UPDATE`;
       const existing = await tx.marketListing.findUnique({ where: { sourceId_externalId: { sourceId: source.id, externalId: p.externalId } }, include: { offer: true } });
       const metadataOverrides = existing?.sourceFingerprint===sourceFingerprint?existing.metadataOverrides:null;
