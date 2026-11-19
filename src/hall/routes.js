@@ -14,7 +14,7 @@ function registerHall({app,prisma,redis,config,auth,admin,limit,io}){
   app.get(root+'/catalog',async(_req,res)=>res.json(await catalog()));
   app.get(root+'/vehicles',async(req,res)=>{
     const q=z.object({q:z.string().max(100).default(''),make:z.string().max(100).optional(),model:z.string().max(100).optional()}).parse(req.query);
-    const rows=await prisma.marketCar.findMany({where:{...(q.make?{maker:q.make}:{}),...(q.model?{model:q.model}:{}),...(q.q?{OR:[{key:{contains:normalize(q.q)}},{aliases:{has:normalize(q.q)}}]}:{})},select:{maker:true,model:true,trim:true},orderBy:{key:'asc'},take:500});res.json({items:rows});
+    const rows=await prisma.$queryRaw(require('./vehicles').vehicleSearchSql(q));res.json({items:rows});
   });
   app.get(root+'/listings',async(req,res)=>{
     const q=pageSchema.extend({q:z.string().max(150).default(''),make:z.string().max(100).optional(),model:z.string().max(100).optional(),city:z.string().max(100).optional(),min:z.coerce.number().int().min(0).max(1000000000000).optional(),max:z.coerce.number().int().min(0).max(1000000000000).optional(),yearMin:z.coerce.number().int().min(1300).max(2100).optional(),yearMax:z.coerce.number().int().min(1300).max(2100).optional(),mileageMax:z.coerce.number().int().min(0).max(2000000).optional(),inspection:z.enum(['VERIFIED']).optional(),sort:z.enum(['newest','price_asc','price_desc','mileage']).default('newest')}).parse(req.query);

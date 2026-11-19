@@ -2,7 +2,7 @@ const{test}=require('node:test');const assert=require('node:assert/strict');
 const{randomUUID}=require('node:crypto');
 const{details,draftSchema,analyzePrices,expressEligible,defaultPlans}=require('../src/hall/domain');
 const{createHall,listingDto}=require('../src/hall/service');
-const full={make:'پژو',model:'207',trim:'پانوراما',year:1403,mileage:20000,color:'سفید',bodyCondition:'سالم',technicalCondition:'سالم',city:'تهران',description:'خودرو سالم با سابقه سرویس و نگهداری منظم',contactPhone:'09901234567',priceToman:3500000000};
+const full={make:'پژو',model:'207',trim:'پانوراما',year:1403,mileage:20000,color:'سفید',bodyCondition:'سالم',technicalCondition:'سالم',city:'تهران',description:'خودرو سالم با سابقه سرویس و نگهداری منظم',contactPhone:'09901234567',priceToman:3500000000,fuelType:'بنزین',gearboxType:'اتوماتیک',location:{latitude:35.712345,longitude:51.423456,visibility:'AREA',address:'نشانی خصوصی خودرو'}};
 test('Hall drafts may be incomplete, publication requires a separate valid contact and large car prices',()=>{
  assert.deepEqual(draftSchema.parse({description:'ناتمام',contactPhone:'09'}),{description:'ناتمام',contactPhone:'09'});
  assert.equal(details.required({priceToman:true}).parse(full).priceToman,3500000000);

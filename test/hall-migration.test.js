@@ -30,8 +30,8 @@ test('actual Hall migrations and Prisma HTTP deletion reproduce the old CHECK fa
     await prisma.hallOrder.create({data:{userId:owner,listingId:listing.id,listingVersion:2,action:'UPGRADE',planCode:'FEATURED',snapshot:{name:'Featured',durationHours:48},amountToman:50000,idempotencyKey:randomUUID(),status:'VERIFIED',activatedAt:new Date()}});
     const conversation=await prisma.hallConversation.create({data:{listingId:listing.id,buyerId:buyer,sellerId:owner}});
     await prisma.hallMessage.create({data:{conversationId:conversation.id,senderId:buyer,clientId:randomUUID(),body:'Saved conversation'}});
-    const errors=[],app=express();app.use(express.json());
-    registerHall({app,prisma,redis:{},config:{},auth:(req,res,next)=>{if(![owner,buyer,stranger].includes(req.headers.authorization))return res.sendStatus(401);req.user={id:req.headers.authorization};next();},admin:(_req,res)=>res.sendStatus(401),limit:()=>((_req,_res,next)=>next())});
+    const proofs=new Map(),errors=[],app=express();app.use(express.json());
+    registerHall({app,prisma,redis:{getdel:async key=>{const value=proofs.get(key);proofs.delete(key);return value;}},config:{},auth:(req,res,next)=>{if(![owner,buyer,stranger].includes(req.headers.authorization))return res.sendStatus(401);req.user={id:req.headers.authorization};next();},admin:(_req,res)=>res.sendStatus(401),limit:()=>((_req,_res,next)=>next())});
     app.use((error,_req,res,_next)=>{errors.push(error);res.status(error.status||500).json({error:'request failed'});});
     server=app.listen(0,'127.0.0.1');await new Promise(resolve=>server.once('listening',resolve));
     const base=`http://127.0.0.1:${server.address().port}/api/v1/hall`;
@@ -57,6 +57,22 @@ test('actual Hall migrations and Prisma HTTP deletion reproduce the old CHECK fa
       assert.equal((await remove(row.id)).status,204);
     }
     await assert.rejects(prisma.hallListing.update({where:{id:listing.id},data:{status:'INVALID'}}),/HallListing_status_check/);
+    await db.exec('CREATE TABLE "MarketCar" (id TEXT PRIMARY KEY, "key" TEXT UNIQUE, maker TEXT, model TEXT, trim TEXT, aliases TEXT[])');
+    await db.query('INSERT INTO "MarketCar" VALUES ($1,$2,$3,$4,$5,$6)',[randomUUID(),'peugeot 207 panorama','پژو','207','پانوراما',['پژو 207','peugeot 207']]);
+    await db.query('INSERT INTO "MarketCar" VALUES ($1,$2,$3,$4,$5,$6)',[randomUUID(),'mazda 3','مزدا','3','سدان',['مزدا 3']]);
+    const cars=await (await fetch(`${base}/vehicles?q=${encodeURIComponent('پژو ۲۰۷')}`)).json();assert.equal(cars.items.length,1);assert.equal(cars.items[0].model,'207');
+    assert.equal((await (await fetch(`${base}/vehicles?q=${encodeURIComponent('پژو۲۰۷')}`)).json()).items.length,1);
+    assert.equal((await (await fetch(`${base}/vehicles?q=${encodeURIComponent("207' OR 1=1--")}`)).json()).items.length,0);
+    const draft=await prisma.hallListing.create({data:{ownerId:owner}});
+    const details={make:'پژو',model:'207',trim:'پانوراما',year:1403,mileage:20000,color:'سفید',bodyCondition:'سالم',technicalCondition:'سالم',city:'تهران',description:'خودروی سالم با سابقه نگهداری منظم برای تست کامل ثبت آگهی',contactPhone:'09901234567',priceToman:3500000000,fuelType:'بنزین',gearboxType:'اتوماتیک',chassisCondition:'سالم و پلمپ',gearboxCondition:'سالم و پلمپ',location:{latitude:35.712345,longitude:51.423456,visibility:'AREA',address:'Private building 27'}};
+    const patch=async(version,data)=>{const response=await fetch(`${base}/mine/${draft.id}`,{method:'PATCH',headers:{authorization:owner,'Content-Type':'application/json'},body:JSON.stringify({version,details:data})});assert.equal(response.status,200);return response.json();};
+    const saved=await patch(0,details);assert.equal(saved.details.location.latitude,details.location.latitude);
+    await prisma.hallPhoto.create({data:{listingId:draft.id,storageKey:'fixture-'+randomUUID(),mimeType:'image/png'}});
+    const proof=randomUUID();proofs.set(`hall:captcha:proof:${owner}:${draft.id}:${proof}`,'1');
+    const published=await fetch(`${base}/mine/${draft.id}/publish`,{method:'POST',headers:{authorization:owner,'Content-Type':'application/json'},body:JSON.stringify({proof})});assert.equal(published.status,200);
+    let publicAd=await (await fetch(`${base}/listings/${draft.id}`)).json();assert.equal(publicAd.gearboxType,'اتوماتیک');assert.equal(publicAd.fuelType,'بنزین');assert.equal(publicAd.location.radiusMeters,2000);assert.notEqual(publicAd.location.latitude,details.location.latitude);assert.ok(!JSON.stringify(publicAd).includes(details.location.address));
+    await patch(saved.version,{...details,location:{...details.location,visibility:'EXACT'}});
+    publicAd=await (await fetch(`${base}/listings/${draft.id}`)).json();assert.equal(publicAd.location.latitude,details.location.latitude);assert.equal(publicAd.location.radiusMeters,0);assert.equal(publicAd.location.address,details.location.address);
     assert.equal(errors.filter(e=>!e.status).length,1,'only the deliberately reproduced old schema fails');
   }finally{
     if(server)await new Promise(resolve=>server.close(resolve));

@@ -1,11 +1,13 @@
 const {HttpError}=require('../domain');
+const {publicLocation}=require('./location');
 const {createZarinpal}=require('../zarinpal');
-const {details,indexFields,analyzePrices,expressEligible,defaultPlans,planSchema,bannerSchema,normalize}=require('./domain');
+const {publicationDetails,details,indexFields,analyzePrices,expressEligible,defaultPlans,planSchema,bannerSchema,normalize}=require('./domain');
 const include={photos:{orderBy:{position:'asc'}},orders:{where:{status:'VERIFIED',activatedAt:{not:null}},orderBy:{verifiedAt:'desc'}}};
 const lock=async(tx,id)=>tx.$queryRaw`SELECT id FROM "HallListing" WHERE id=${id} FOR UPDATE`;
 function listingDto(row,owned=false){
   const{ownerId,draft,photos,orders,...rest}=row;
   return{...rest,priceToman:row.priceToman==null?null:Number(row.priceToman),details:owned?draft:undefined,contactPhone:row.status==='PUBLISHED'||owned?draft.contactPhone:undefined,
+    fuelType:draft.fuelType,gearboxType:draft.gearboxType,chassisCondition:draft.chassisCondition,gearboxCondition:draft.gearboxCondition,location:owned?draft.location:publicLocation(draft.location),
     description:row.status==='PUBLISHED'||owned?draft.description:undefined,color:draft.color,
     photos:(photos||[]).map(p=>({id:p.id,url:`/hall/photos/${p.id}`+(owned?`?token=${p.readToken}`:'')})),
     services:(orders||[]).filter(o=>o.activatedAt&&new Date(o.activatedAt.getTime()+o.snapshot.durationHours*3600000)>new Date()).map(o=>({name:o.snapshot.name,code:o.planCode,until:new Date(o.activatedAt.getTime()+o.snapshot.durationHours*3600000),mode:o.mode})),
@@ -46,7 +48,7 @@ function createHall(prisma,config,provider=createZarinpal({...config,ZARINPAL_MO
     return listingDto(await tx.hallListing.update({where:{id},data:{draft:data,...indexFields(data),...(row.status==='PUBLISHED'?{inspectionStatus:'NOT_INSPECTED',inspectionNote:null}:{}),version:{increment:1}},include}),true);
   });}
   async function validatePublish(tx,row){
-    const data=details.required({priceToman:true}).parse(row.draft);
+    const data=publicationDetails.parse(row.draft);
     const year=data.year<1800?Number(new Intl.DateTimeFormat('en-US-u-ca-persian',{year:'numeric'}).formatToParts(new Date()).find(p=>p.type==='year')?.value):new Date().getUTCFullYear();
     if(data.year>year+1)throw new HttpError(400,'سال تولید معتبر نیست.');
     if(!row.photos.length)throw new HttpError(400,'حداقل یک تصویر خودرو بارگذاری کنید.');

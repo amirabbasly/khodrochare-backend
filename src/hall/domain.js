@@ -2,6 +2,7 @@ const {z}=require('zod');
 const {normalize}=require('../market/domain');
 const phone=z.string().regex(/^09\d{9}$/);
 const text=z.string().trim().max(120);
+const location=z.object({latitude:z.number().min(-90).max(90),longitude:z.number().min(-180).max(180),visibility:z.enum(['EXACT','AREA']),address:z.string().trim().max(500).optional()}).strict();
 const details=z.object({
   make:text.min(1),model:text.min(1),trim:text.min(1),
   year:z.number().int().min(1300).max(2100),mileage:z.number().int().min(0).max(2000000),
@@ -9,9 +10,15 @@ const details=z.object({
   technicalCondition:z.enum(['سالم','نیازمند سرویس','نیازمند تعمیر']),city:text.min(2),
   description:z.string().trim().min(20).max(6000),contactPhone:phone,
   priceToman:z.number().int().min(1000000).max(1000000000000).optional(),
+  fuelType:z.enum(['بنزین','دیزل','دوگانه‌سوز','هیبریدی','برقی','گازسوز']).optional(),
+  gearboxType:z.enum(['دستی','اتوماتیک','نیمه‌اتوماتیک']).optional(),
+  chassisCondition:z.enum(['سالم و پلمپ','ضربه‌خورده','تعویض‌شده']).optional(),
+  gearboxCondition:z.enum(['سالم','سالم و پلمپ','نیازمند سرویس','نیازمند تعمیر','تعویض‌شده']).optional(),
+  location:location.optional(),
 }).strict();
 const draftSchema=details.partial().extend({make:text.optional(),model:text.optional(),trim:text.optional(),city:text.optional(),color:text.optional(),description:z.string().max(6000).optional(),contactPhone:z.string().regex(/^\d{0,11}$/).optional()});
-const priceInput=details.omit({description:true,color:true,contactPhone:true,priceToman:true});
+const priceInput=details.pick({make:true,model:true,trim:true,year:true,mileage:true,bodyCondition:true,technicalCondition:true,city:true});
+const publicationDetails=details.required({priceToman:true,fuelType:true,gearboxType:true,location:true});
 const planSchema=z.object({
   code:z.enum(['MANAGED','REPAIR_SELL','EXPRESS48','FREE','LADDER','URGENT','FEATURED']),
   name:text.min(2),kind:z.enum(['PLAN','BOOST']),description:z.string().min(5).max(1000),
@@ -44,4 +51,4 @@ function analyzePrices(rows,now=new Date()){
   const n=values.length,median=n%2?values[Math.floor(n/2)]:(values[n/2-1]+values[n/2])/2;
   return{sampleCount:n,isEstimate:n<5,min:values[0],max:values[n-1],average:Math.round(values.reduce((a,b)=>a+b,0)/n),median:Math.round(median),suggested:Math.round(median*.98/1000000)*1000000,checkedAt:now,source:'قیمت درخواستی آگهی‌های فعال ۳۰ روز اخیر تالار خودرو چاره',notice:n<5?'تخمین با نمونه محدود؛ قیمت معامله قطعی نیست.':'پیشنهاد فروش سریع‌تر: ۲٪ زیر میانه قیمت درخواستی موارد مشابه؛ تضمین فروش نیست.'};
 }
-module.exports={details,draftSchema,priceInput,planSchema,bannerSchema,defaultPlans,expressEligible,indexFields,analyzePrices,phone,normalize};
+module.exports={publicationDetails,location,details,draftSchema,priceInput,planSchema,bannerSchema,defaultPlans,expressEligible,indexFields,analyzePrices,phone,normalize};

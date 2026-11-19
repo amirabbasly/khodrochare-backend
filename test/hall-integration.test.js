@@ -7,7 +7,7 @@ test('Hall real PostgreSQL persists BigInt prices, isolates owners, snapshots ta
   const owner=await db.user.create({data:{role:'CUSTOMER',fullName:'Hall test owner',phone:'09'+String(Date.now()).slice(-9),nationalId:String(Date.now()).slice(-10),passwordHash:'fixture-not-a-real-password'}});ids.push(owner.id);
   const provider={mode:'sandbox',redirect:a=>'https://sandbox.zarinpal.com/pg/StartPay/'+a,request:async()=>({authority:'S'+randomUUID().replace(/-/g,'')+'123'}),verify:async()=>({refId:'123456789'})};
   const service=createHall(db,{},provider);await service.ready();
-  const details={make:'پژو',model:'207',trim:'fixture',year:1403,mileage:20000,color:'سفید',bodyCondition:'سالم',technicalCondition:'سالم',city:'تهران',description:'خودروی نمونه برای آزمون یکپارچه تالار و قیمت میلیاردی',contactPhone:'09901234567',priceToman:3500000000};
+  const details={make:'پژو',model:'207',trim:'fixture',year:1403,mileage:20000,color:'سفید',bodyCondition:'سالم',technicalCondition:'سالم',city:'تهران',description:'خودروی نمونه برای آزمون یکپارچه تالار و قیمت میلیاردی',contactPhone:'09901234567',priceToman:3500000000,fuelType:'بنزین',gearboxType:'اتوماتیک',location:{latitude:35.712345,longitude:51.423456,visibility:'AREA',address:'نشانی خصوصی خودرو'}};
   const draft=await db.hallListing.create({data:{ownerId:owner.id,draft:{}}});await service.save(draft.id,owner.id,details,0);
   await db.hallPhoto.create({data:{listingId:draft.id,storageKey:'fixture-'+randomUUID(),mimeType:'image/png'}});
   await assert.rejects(service.owned(draft.id,randomUUID()),{status:404});
