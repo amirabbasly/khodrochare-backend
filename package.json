@@ -10,7 +10,7 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
-    "test": "node --test test/domain.test.js test/services.test.js test/http.test.js test/realtime.test.js test/pricing.test.js test/session-cookies.test.js test/catalog-geocoding.test.js test/payments.test.js test/monitoring.test.js test/market.test.js test/discovery.test.js test/gateway.test.js test/hall.test.js test/hall-chat.test.js",
+    "test": "node --test test/domain.test.js test/services.test.js test/http.test.js test/realtime.test.js test/pricing.test.js test/session-cookies.test.js test/catalog-geocoding.test.js test/payments.test.js test/monitoring.test.js test/market.test.js test/discovery.test.js test/gateway.test.js test/hall.test.js test/hall-chat.test.js test/hall-migration.test.js",
     "test:integration": "node --test test/integration.test.js",
     "prisma:generate": "prisma generate",
     "prisma:validate": "prisma validate",
@@ -40,6 +40,8 @@
     "deepmerge-ts": "8.0.0"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.17",
+    "@electric-sql/pglite-socket": "^0.2.20",
     "socket.io-client": "^4.8.4"
   }
 }

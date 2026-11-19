@@ -20,6 +20,9 @@ test('Hall real PostgreSQL persists BigInt prices, isolates owners, snapshots ta
   await db.hallPlan.update({where:{code:'MANAGED'},data:{priceToman:originalFee}});
   const incompatible=await db.hallListing.create({data:{ownerId:owner.id,status:'PUBLISHED',publishedAt:new Date(),draft:{...details,trim:'different'},...indexFields({...details,trim:'different'})}});
   assert.ok(incompatible.id);const result=await service.estimate(details,randomUUID());assert.equal(result.sampleCount,1);assert.equal(result.isEstimate,true);
+  await service.remove(draft.id,owner.id);await service.remove(draft.id,owner.id);
+  assert.equal((await db.hallListing.findUnique({where:{id:draft.id}})).status,'DELETED');
+  assert.equal(await db.hallOrder.count({where:{listingId:draft.id}}),1);
  }finally{
   if(ids.length){const listings=await db.hallListing.findMany({where:{ownerId:{in:ids}},select:{id:true}}),where={listingId:{in:listings.map(l=>l.id)}};await db.hallOrder.deleteMany({where});await db.hallPhoto.deleteMany({where});await db.hallInquiry.deleteMany({where});await db.hallListing.deleteMany({where:{ownerId:{in:ids}}});await db.user.deleteMany({where:{id:{in:ids}}});}
   await db.$disconnect();

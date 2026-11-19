@@ -33,6 +33,12 @@ function createHall(prisma,config,provider=createZarinpal({...config,ZARINPAL_MO
     const pending=await tx.hallOrder.findFirst({where:{listingId:row.id,status:{in:['CREATING','PENDING']}}});
     if(pending)throw new HttpError(409,'ابتدا پرداخت در جریان را تکمیل یا از بخش پرداخت لغو کنید.');
   }
+  async function remove(id,userId){return prisma.$transaction(async tx=>{
+    await lock(tx,id);const row=await owned(id,userId,tx);
+    if(row.status==='DELETED')return;
+    if(['DRAFT','PUBLISHED'].includes(row.status))await editable(tx,row);
+    await tx.hallListing.update({where:{id},data:{status:'DELETED',version:{increment:1}}});
+  });}
   async function save(id,userId,data,version){return prisma.$transaction(async tx=>{
     await lock(tx,id);const row=await owned(id,userId,tx);await editable(tx,row);
     if(row.status==='PUBLISHED')details.required({priceToman:true}).parse(data);
@@ -119,6 +125,6 @@ function createHall(prisma,config,provider=createZarinpal({...config,ZARINPAL_MO
       return activate(tx,paid,row);
     });
   }
-  return{ready,owned,editable,save,estimate,freePublish,checkout,verify,orderDto,listingDto};
+  return{ready,owned,editable,remove,save,estimate,freePublish,checkout,verify,orderDto,listingDto};
 }
 module.exports={createHall,listingDto,include,lock};
