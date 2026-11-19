@@ -60,7 +60,7 @@ function createApp({ prisma, redis, config, io, services: s }) {
     const { q } = z.object({ q: z.string().trim().min(3).max(150) }).parse(req.query);
     res.json(await geocoder.search(q));
   });
-  require('./monitoring').registerMonitoring({ app, prisma, redis, config, auth, limit, geocoder });
+  require('./monitoring').registerMonitoring({ app, prisma, redis, config, auth, limit, geocoder, io });
   app.post('/api/v1/locations/reverse', auth, limit('reverse', 60, 60), async (req, res) => {
     const point = d.point.parse(req.body);
     const place = await geocoder.resolve(null, point);

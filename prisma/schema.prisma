@@ -49,6 +49,9 @@ model User {
   hallListings HallListing[]
   hallOrders HallOrder[]
   hallInquiries HallInquiry[]
+  hallPurchases HallConversation[] @relation("HallBuyer")
+  hallSales HallConversation[] @relation("HallSeller")
+  hallMessages HallMessage[]
   createdAt DateTime @default(now())
   @@unique([role, phone])
   @@unique([role, nationalId])
@@ -731,6 +734,7 @@ model HallListing {
   photos HallPhoto[]
   orders HallOrder[]
   inquiries HallInquiry[]
+  conversations HallConversation[]
   @@index([status, publishedAt])
   @@index([ownerId, updatedAt])
   @@index([makeKey, modelKey, trimKey, year])
@@ -804,4 +808,33 @@ model HallBanner {
   active Boolean @default(true)
   sortOrder Int @default(0)
   createdAt DateTime @default(now())
+}
+
+model HallConversation {
+  id String @id @default(uuid())
+  listingId String
+  listing HallListing @relation(fields: [listingId], references: [id])
+  buyerId String
+  sellerId String
+  buyer User @relation("HallBuyer", fields: [buyerId], references: [id])
+  seller User @relation("HallSeller", fields: [sellerId], references: [id])
+  buyerReadAt DateTime @default(now())
+  sellerReadAt DateTime @default(now())
+  updatedAt DateTime @default(now())
+  messages HallMessage[]
+  @@unique([listingId, buyerId])
+  @@index([buyerId, updatedAt])
+  @@index([sellerId, updatedAt])
+}
+model HallMessage {
+  id String @id @default(uuid())
+  conversationId String
+  conversation HallConversation @relation(fields: [conversationId], references: [id])
+  senderId String
+  sender User @relation(fields: [senderId], references: [id])
+  clientId String
+  body String
+  createdAt DateTime @default(now())
+  @@unique([conversationId, senderId, clientId])
+  @@index([conversationId, createdAt, id])
 }

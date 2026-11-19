@@ -17,7 +17,7 @@ const io = new Server(server, { cors: { origin: config.origins, credentials: tru
 const services = createServices({ prisma, redis, config, io });
 app = createApp({ prisma, redis, config, io, services });
 
-attachRealtime(io, services, redis);
+attachRealtime(io, services, redis, prisma);
 
 // Durable database outbox bridges PostgreSQL commits and Redis without losing jobs.
 const queue = new Queue('request-events', { connection: jobsRedis });

@@ -61,8 +61,8 @@ test('gateway failure cannot publish an ad; stale edits and active pending payme
  const db=database();await assert.rejects(db.service.save(db.row.id,'owner',full,1),{status:409});
  db.provider.request=async()=>{throw new Error('offline');};await assert.rejects(db.service.checkout({id:'owner'},db.row.id,{planCode:'MANAGED',idempotencyKey:randomUUID()}),/offline/);assert.equal(db.orders[0].status,'FAILED');assert.equal(db.row.status,'DRAFT');
 });
-test('public Hall DTO strips owner identity, draft phone and image read tokens',()=>{
- const db=database(),publicRow=listingDto({...db.row,status:'PUBLISHED'});assert.equal(publicRow.ownerId,undefined);assert.equal(publicRow.details,undefined);assert.ok(!publicRow.photos[0].url.includes('secret'));assert.ok(!JSON.stringify(publicRow).includes(full.contactPhone));
+test('public Hall DTO exposes the listing contact only when published and strips owner identity and image read tokens',()=>{
+ const db=database(),publicRow=listingDto({...db.row,status:'PUBLISHED'});assert.equal(publicRow.ownerId,undefined);assert.equal(publicRow.details,undefined);assert.ok(!publicRow.photos[0].url.includes('secret'));assert.equal(publicRow.contactPhone,full.contactPhone);assert.equal(listingDto(db.row).contactPhone,undefined);
 });
 
 test('every Hall admin mutation and private owner route authenticates before reading or writing data',async()=>{
@@ -77,4 +77,13 @@ test('every Hall admin mutation and private owner route authenticates before rea
    const response=await fetch(root+route,{method,headers:{'Content-Type':'application/json'},body:method==='GET'?undefined:'{}'});assert.equal(response.status,401,route);
   }
  }finally{await new Promise(r=>server.close(r));}
+});
+
+test('published owner edits preserve publication, reject stale versions and clear the inspection approval',async()=>{
+ const db=database();await db.service.freePublish(db.row.id,'owner');db.row.inspectionStatus='VERIFIED';db.row.inspectionNote='old';
+ await assert.rejects(db.service.save(db.row.id,'stranger',full,db.row.version),{status:404});
+ await assert.rejects(db.service.save(db.row.id,'owner',{},db.row.version));
+ const edited=await db.service.save(db.row.id,'owner',{...full,priceToman:4000000000},db.row.version);
+ assert.equal(edited.status,'PUBLISHED');assert.equal(edited.priceToman,4000000000);assert.equal(edited.inspectionStatus,'NOT_INSPECTED');assert.equal(edited.inspectionNote,null);
+ await assert.rejects(db.service.save(db.row.id,'owner',full,2),{status:409});
 });

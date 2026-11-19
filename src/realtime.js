@@ -1,6 +1,6 @@
 const { location, HttpError } = require('./domain');
 const { cookieToken } = require('./session-cookies');
-function attachRealtime(io, services, redis) {
+function attachRealtime(io, services, redis, prisma) {
   io.use(async (socket, next) => {
     try {
       socket.data.token = socket.handshake.auth.token || cookieToken(socket.handshake.headers.cookie, socket.handshake.auth.role);
@@ -20,6 +20,7 @@ function attachRealtime(io, services, redis) {
         if (e.status === 401) socket.disconnect(true);
       }
     };
+    if(prisma)require('./hall/chat').attachChat(socket,run,prisma,redis,io);
     const recheck = setInterval(async () => {
       try { await services.authenticate(socket.data.token); } catch { socket.disconnect(true); }
     }, 15000);

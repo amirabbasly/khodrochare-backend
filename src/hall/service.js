@@ -5,7 +5,7 @@ const include={photos:{orderBy:{position:'asc'}},orders:{where:{status:'VERIFIED
 const lock=async(tx,id)=>tx.$queryRaw`SELECT id FROM "HallListing" WHERE id=${id} FOR UPDATE`;
 function listingDto(row,owned=false){
   const{ownerId,draft,photos,orders,...rest}=row;
-  return{...rest,priceToman:row.priceToman==null?null:Number(row.priceToman),details:owned?draft:undefined,
+  return{...rest,priceToman:row.priceToman==null?null:Number(row.priceToman),details:owned?draft:undefined,contactPhone:row.status==='PUBLISHED'||owned?draft.contactPhone:undefined,
     description:row.status==='PUBLISHED'||owned?draft.description:undefined,color:draft.color,
     photos:(photos||[]).map(p=>({id:p.id,url:`/hall/photos/${p.id}`+(owned?`?token=${p.readToken}`:'')})),
     services:(orders||[]).filter(o=>o.activatedAt&&new Date(o.activatedAt.getTime()+o.snapshot.durationHours*3600000)>new Date()).map(o=>({name:o.snapshot.name,code:o.planCode,until:new Date(o.activatedAt.getTime()+o.snapshot.durationHours*3600000),mode:o.mode})),
@@ -28,15 +28,16 @@ function createHall(prisma,config,provider=createZarinpal({...config,ZARINPAL_MO
   async function ready(){if(!boot)boot=initialize().catch(e=>{boot=null;throw e;});return boot;}
   async function owned(id,userId,tx=prisma){const row=await tx.hallListing.findFirst({where:{id,ownerId:userId},include});if(!row)throw new HttpError(404,'آگهی پیدا نشد.');return row;}
   async function editable(tx,row){
-    if(row.status!=='DRAFT')throw new HttpError(409,'ویرایش فقط برای پیش‌نویس امکان‌پذیر است.');
+    if(!['DRAFT','PUBLISHED'].includes(row.status))throw new HttpError(409,'این آگهی قابل ویرایش نیست.');
     await tx.hallOrder.updateMany({where:{listingId:row.id,status:'CREATING',createdAt:{lt:new Date(Date.now()-120000)}},data:{status:'FAILED',errorCode:'REQUEST_EXPIRED'}});
     const pending=await tx.hallOrder.findFirst({where:{listingId:row.id,status:{in:['CREATING','PENDING']}}});
     if(pending)throw new HttpError(409,'ابتدا پرداخت در جریان را تکمیل یا از بخش پرداخت لغو کنید.');
   }
   async function save(id,userId,data,version){return prisma.$transaction(async tx=>{
     await lock(tx,id);const row=await owned(id,userId,tx);await editable(tx,row);
+    if(row.status==='PUBLISHED')details.required({priceToman:true}).parse(data);
     if(row.version!==version)throw new HttpError(409,'پیش‌نویس در جای دیگری تغییر کرده است؛ دوباره آن را باز کنید.');
-    return listingDto(await tx.hallListing.update({where:{id},data:{draft:data,...indexFields(data),version:{increment:1}},include}),true);
+    return listingDto(await tx.hallListing.update({where:{id},data:{draft:data,...indexFields(data),...(row.status==='PUBLISHED'?{inspectionStatus:'NOT_INSPECTED',inspectionNote:null}:{}),version:{increment:1}},include}),true);
   });}
   async function validatePublish(tx,row){
     const data=details.required({priceToman:true}).parse(row.draft);
