@@ -63,7 +63,7 @@ function registerHall({app,prisma,redis,config,auth,admin,limit,io}){
     if(!photo||photo.listing.status!=='PUBLISHED'&&req.query.token!==photo.readToken)throw new HttpError(404,'تصویر پیدا نشد.');
     res.set({'Content-Type':photo.mimeType,'X-Content-Type-Options':'nosniff','Cache-Control':'private, no-store','Referrer-Policy':'no-referrer','Cross-Origin-Resource-Policy':'cross-origin'});res.send(await fs.readFile(path.resolve(config.UPLOAD_DIR,photo.storageKey)));
   });
-  app.get(root+'/listings/:id',async(req,res)=>{const row=await prisma.hallListing.findFirst({where:{id:uuid.parse(req.params.id),status:'PUBLISHED'},include});if(!row)throw new HttpError(404,'آگهی پیدا نشد.');res.json(listingDto(row));});
+  app.get(root+'/listings/:id',async(req,res)=>{const row=await prisma.hallListing.findFirst({where:{id:uuid.parse(req.params.id),status:'PUBLISHED'},include:{...include,owner:{select:{fullName:true}}}});if(!row)throw new HttpError(404,'آگهی پیدا نشد.');res.json(listingDto(row));});
   app.post(root+'/listings/:id/view',limit('hall-view',100,60),async(req,res)=>{const id=uuid.parse(req.params.id);if(await redis.set('hall:view:'+id+':'+hash(req.ip+String(req.headers['user-agent'])),'1','EX',86400,'NX'))await prisma.hallListing.updateMany({where:{id,status:'PUBLISHED'},data:{viewCount:{increment:1}}});res.status(204).end();});
   app.post(root+'/listings/:id/inquiries',auth,limit('hall-inquiry',10,3600),async(req,res)=>{
     const id=uuid.parse(req.params.id),input=z.object({message:z.string().trim().min(5).max(1000),contactPhone:phone}).strict().parse(req.body);

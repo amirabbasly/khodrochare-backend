@@ -18,7 +18,7 @@ test('actual Hall migrations and Prisma HTTP deletion reproduce the old CHECK fa
   try{
     // Only the foreign-key target is a fixture. The Hall tables and constraints are
     // created from the exact deployed migrations, not copies or JavaScript mocks.
-    await db.exec('CREATE TABLE "User" (id TEXT PRIMARY KEY)');
+    await db.exec(`CREATE TABLE "User" (id TEXT PRIMARY KEY, "fullName" TEXT NOT NULL DEFAULT 'Fixture user')`);
     await db.exec(await migration('202611180003_car_hall'));
     await db.exec(await migration('202611190001_hall_chat'));
     await tcp.start();

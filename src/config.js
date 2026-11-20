@@ -1,6 +1,9 @@
 require('dotenv').config({ quiet: true });
 const { z } = require('zod');
 const config = z.object({
+  GAPGPT_API_KEY: z.string().default(''),
+  GAPGPT_MODEL: z.string().min(1).max(100).default('gpt-4o'),
+  ASSISTANT_SUPPORT_PHONE: z.string().regex(/^0\d{7,14}$/).default('09123022064'),
   ZARINPAL_MODE: z.enum(['sandbox','live']).default('sandbox'),
   HALL_PLANS_JSON:z.string().optional(),
   HALL_BANNERS_JSON:z.string().optional(),

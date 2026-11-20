@@ -5,8 +5,8 @@ const {publicationDetails,details,indexFields,analyzePrices,expressEligible,defa
 const include={photos:{orderBy:{position:'asc'}},orders:{where:{status:'VERIFIED',activatedAt:{not:null}},orderBy:{verifiedAt:'desc'}}};
 const lock=async(tx,id)=>tx.$queryRaw`SELECT id FROM "HallListing" WHERE id=${id} FOR UPDATE`;
 function listingDto(row,owned=false){
-  const{ownerId,draft,photos,orders,...rest}=row;
-  return{...rest,priceToman:row.priceToman==null?null:Number(row.priceToman),details:owned?draft:undefined,contactPhone:row.status==='PUBLISHED'||owned?draft.contactPhone:undefined,
+  const{ownerId,owner,draft,photos,orders,...rest}=row;
+  return{...rest,seller:owner?{fullName:owner.fullName}:undefined,priceToman:row.priceToman==null?null:Number(row.priceToman),details:owned?draft:undefined,contactPhone:row.status==='PUBLISHED'||owned?draft.contactPhone:undefined,
     fuelType:draft.fuelType,gearboxType:draft.gearboxType,chassisCondition:draft.chassisCondition,gearboxCondition:draft.gearboxCondition,location:owned?draft.location:publicLocation(draft.location),
     description:row.status==='PUBLISHED'||owned?draft.description:undefined,color:draft.color,
     photos:(photos||[]).map(p=>({id:p.id,url:`/hall/photos/${p.id}`+(owned?`?token=${p.readToken}`:'')})),

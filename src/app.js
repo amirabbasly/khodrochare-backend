@@ -21,7 +21,7 @@ function createApp({ prisma, redis, config, io, services: s }) {
   app.set('trust proxy', config.TRUST_PROXY);
   app.use(helmet());
   app.use(cors({ origin: config.origins, credentials: true, exposedHeaders: ['X-Session-Expires-At'] }));
-  app.use(express.json({ limit: '256kb' }));
+  app.use(express.json({ limit: '256kb', verify: (req,_res,buffer) => { req.bodyBytes=buffer.length; } }));
   const auth = async (req, res, next) => {
     try {
       req.token = req.headers.authorization?.replace(/^Bearer /, '') || cookieToken(req.headers.cookie, req.get('X-App-Role'));
@@ -51,6 +51,7 @@ function createApp({ prisma, redis, config, io, services: s }) {
     catch { res.status(503).json({ status: 'unavailable' }); }
   });
   app.use('/api', limit('api', 300, 60));
+  require('./assistant').registerAssistant({app,auth,limit,config});
   app.get('/api/v1/services', (req, res) => res.json({ services: d.services }));
   app.get('/api/v1/vehicle-models', auth, async (req, res) => {
     const { q } = z.object({ q: z.string().max(100).default('') }).parse(req.query);

@@ -13,10 +13,19 @@ function createCatalog(prisma) {
     }
     const text = normalize(name);
     const models = await prisma.vehicleModel.findMany({ include: { group: true } });
-    const matches = models.flatMap(model => [model.normalizedName, ...model.aliases].map(alias => ({ model, alias })))
-      .filter(({ alias }) => text.startsWith(alias) && !(/\d$/.test(alias) && /^\d/.test(text.slice(alias.length))))
-      .sort((a, b) => b.alias.length - a.alias.length);
-    return matches[0]?.model || null;
+    let match = null, longest = -1;
+    // Keep the longest prefix and the original first-match tie order without
+    // allocating one object per alias or sorting all matching candidates.
+    for (const model of models) {
+      for (let i = -1; i < model.aliases.length; i++) {
+        const alias = i < 0 ? model.normalizedName : model.aliases[i];
+        if (alias.length <= longest || !text.startsWith(alias)) continue;
+        if (/\d$/.test(alias) && /^\d/.test(text.slice(alias.length))) continue;
+        match = model;
+        longest = alias.length;
+      }
+    }
+    return match;
   }
   return { search, resolve };
 }

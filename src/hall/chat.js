@@ -13,7 +13,7 @@ function registerChat({app,prisma,auth,limit}){
     const {listingId}=z.object({listingId:uuid}).strict().parse(req.body);
     const row=await prisma.hallListing.findFirst({where:{id:listingId,status:'PUBLISHED'}});
     if(!row||row.ownerId===req.user.id)throw new HttpError(400,'برای این آگهی نمی‌توانید گفتگوی جدید باز کنید.');
-    res.json(await prisma.hallConversation.upsert({where:{listingId_buyerId:{listingId,buyerId:req.user.id}},create:{listingId,buyerId:req.user.id,sellerId:row.ownerId},update:{}}));
+    res.json(await prisma.hallConversation.upsert({where:{listingId_buyerId:{listingId,buyerId:req.user.id}},create:{listingId,buyerId:req.user.id,sellerId:row.ownerId},update:{},include:{listing:{select:{make:true,model:true,status:true}}}}));
   });
   app.get(root,auth,async(req,res)=>{
     const page=z.coerce.number().int().min(1).max(10000).default(1).parse(req.query.page);

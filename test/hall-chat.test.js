@@ -78,3 +78,12 @@ test('real WebSocket chat isolates participants, persists retries once, restores
     count=60;assert.equal((await emit(a,'hall:send',{...input,clientId:randomUUID()})).ok,false);assert.equal(messages.length,1);
   }finally{sockets.forEach(s=>s.disconnect());await new Promise(resolve=>io.close(resolve));}
 });
+
+test('starting a listing conversation returns its renderable listing and exposes only the public seller name',async()=>{
+ const listingId=randomUUID(),buyer=randomUUID(),seller=randomUUID();let include;
+ const prisma={hallListing:{findFirst:async()=>({id:listingId,ownerId:seller,status:'PUBLISHED'})},hallConversation:{upsert:async args=>{include=args.include;return{id:randomUUID(),listingId,buyerId:buyer,sellerId:seller,...(args.include?.listing?{listing:{make:'Lucano',model:'L7',status:'PUBLISHED'}}:{})};}}};
+ const app=express();app.use(express.json());registerChat({app,prisma,auth:(req,_res,next)=>{req.user={id:buyer};next();},limit:()=>((_req,_res,next)=>next())});
+ const server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));
+ try{const response=await fetch(`http://127.0.0.1:${server.address().port}/api/v1/hall/conversations`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({listingId})});assert.equal(response.status,200);assert.deepEqual((await response.json()).listing,{make:'Lucano',model:'L7',status:'PUBLISHED'});assert.deepEqual(include,{listing:{select:{make:true,model:true,status:true}}});}finally{await new Promise(r=>server.close(r));}
+ const {listingDto}=require('../src/hall/service');const dto=listingDto({id:listingId,status:'PUBLISHED',ownerId:seller,owner:{fullName:'Public seller',phone:'PRIVATE',nationalId:'PRIVATE'},draft:{contactPhone:'09901234567'},photos:[],orders:[]});assert.deepEqual(dto.seller,{fullName:'Public seller'});assert.equal(dto.owner,undefined);assert.equal(dto.ownerId,undefined);assert.equal(JSON.stringify(dto).includes('PRIVATE'),false);
+});

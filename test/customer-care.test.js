@@ -37,3 +37,11 @@ test('real migrations and Prisma HTTP: searchable catalogue, owned garage, persi
  assert.equal((await request(`/support/tickets/${ticket.id}?before=${randomUUID()}`)).status,400);
  }finally{if(server)await new Promise(r=>server.close(r));if(prisma)await prisma.$disconnect();await tcp.stop();await db.close();}
 });
+
+test('maintenance reads independent data concurrently only after ownership succeeds, preserving the response',async()=>{
+ let running=0,peak=0,children=0;const vehicle={id:'owned',userId:'owner',catalogCarId:'car',mileage:20000},car={maker:'Test',model:'Car'};
+ const child=async value=>{children++;running++;peak=Math.max(peak,running);await new Promise(r=>setTimeout(r,20));running--;return value;};
+ const app=express();app.use(express.json());registerCustomerCare({app,prisma:{vehicle:{findFirst:async({where})=>where.id==='owned'&&where.userId==='owner'?vehicle:null},marketCar:{findUnique:()=>child(car)},maintenanceRecord:{findMany:()=>child([])}},auth:(req,res,next)=>{if(req.headers.authorization!=='owner')return res.sendStatus(401);req.user={id:'owner'};next();},admin:(req,res)=>res.sendStatus(401),limit:()=>((req,res,next)=>next())});app.use((e,req,res,next)=>res.status(e.status||500).json({error:e.message}));
+ const server=app.listen(0,'127.0.0.1');await new Promise(r=>server.once('listening',r));const url=`http://127.0.0.1:${server.address().port}/api/v1/garage`;
+ try{let response=await fetch(url+'/owned/services',{headers:{authorization:'owner'}});assert.equal(response.status,200);assert.deepEqual(await response.json(),{vehicle,items:schedule(vehicle,car,[])});assert.equal(peak,2);assert.equal(children,2);response=await fetch(url+'/missing/services',{headers:{authorization:'owner'}});assert.equal(response.status,404);response=await fetch(url+'/owned/services');assert.equal(response.status,401);assert.equal(children,2,'private child reads never run for missing ownership or authentication');}finally{await new Promise(r=>server.close(r));}
+});

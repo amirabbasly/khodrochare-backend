@@ -62,3 +62,10 @@ test('towing snapshots canonical database model, database rates and cached addre
   assert.equal(saved.pricingBreakdown.baseToman, 100000);
   assert.equal(saved.pricingBreakdown.perKmToman, 10000);
 });
+
+test('single-pass model resolution preserves longest prefix, stable ties and numeric boundaries against the previous matcher',async()=>{
+ const rows=Array.from({length:120},(_,i)=>({id:String(i),normalizedName:`car ${i%40}`,aliases:[`auto ${i}`,`c${i%20}`,i%3?'vehicle':'car'],group:{id:i%5}}));
+ const catalog=createCatalog({vehicleModel:{findMany:async()=>rows}});
+ const previous=name=>{const text=normalize(name);return rows.flatMap(model=>[model.normalizedName,...model.aliases].map(alias=>({model,alias}))).filter(({alias})=>text.startsWith(alias)&&!(/\d$/.test(alias)&&/^\d/.test(text.slice(alias.length)))).sort((a,b)=>b.alias.length-a.alias.length)[0]?.model||null;};
+ for(const name of [...Array.from({length:250},(_,i)=>`car ${i} trim`),...Array.from({length:140},(_,i)=>`auto ${i}`),'vehicle','car','c19 sport','c199','unknown',''])assert.equal(await catalog.resolve(name),previous(name),name);
+});
