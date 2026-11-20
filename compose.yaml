@@ -35,6 +35,9 @@ services:
     env_file: .env
     environment:
       NODE_ENV: production
+      GAPGPT_API_KEY: ${GAPGPT_API_KEY:-}
+      GAPGPT_MODEL: ${GAPGPT_MODEL:-gpt-4o}
+      ASSISTANT_SUPPORT_PHONE: ${ASSISTANT_SUPPORT_PHONE:-09123022064}
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
       PORT: 4000

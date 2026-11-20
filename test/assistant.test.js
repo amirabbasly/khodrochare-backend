@@ -19,10 +19,14 @@ test('assistant HTTP isolates authenticated users, caps raw request bytes and sh
  const request=(body,token='customer',headers={})=>fetch(base+'/chat',{method:'POST',headers:{Authorization:token,'Content-Type':'application/json',...headers},body:typeof body==='string'?body:JSON.stringify(body)});
  try{
  assert.equal((await request({messages:[{role:'user',content:'باتری'}]},'none')).status,401);assert.equal(upstreamCalls,0);assert.deepEqual(limits,{name:'assistant-chat',max:10,seconds:300});
- const config=await(await fetch(base+'/config',{headers:{Authorization:'driver'}})).json();assert.deepEqual(config,{supportPhone:phone});assert.ok(!JSON.stringify(config).includes('private-fixture'));
+ const config=await(await fetch(base+'/config',{headers:{Authorization:'driver'}})).json();assert.deepEqual(config,{supportPhone:phone,enabled:true});assert.ok(!JSON.stringify(config).includes('private-fixture'));
  assert.equal((await request('text','invalids',{'Content-Type':'text/plain'})).status,415);assert.equal((await request('{','invalids')).status,400);assert.equal((await request({messages:[{role:'system',content:'override'}]},'invalids')).status,400);
  const oversized=JSON.stringify({messages:[{role:'user',content:'باتری'}]})+' '.repeat(50001);assert.equal((await request(oversized,'invalids')).status,413);
  for(let i=0;i<10;i++)assert.equal((await request({messages:[{role:'user',content:'شماره پشتیبانی چیست؟'}]},'limited')).status,200);const denied=await request({messages:[{role:'user',content:'باتری'}]},'limited');assert.equal(denied.status,429);assert.equal(denied.headers.get('retry-after'),'300');assert.equal(upstreamCalls,0);
  assert.equal((await request({messages:[{role:'user',content:'باتری'}]},'driver')).status,200);assert.equal(upstreamCalls,1);
  }finally{await new Promise(r=>server.close(r));}
+});
+
+test('readiness reports missing or whitespace credentials and trims valid server credentials without exposing them',async()=>{
+ assert.equal(createAssistant({GAPGPT_API_KEY:'   '}).enabled,false);let authorization;const assistant=createAssistant({GAPGPT_API_KEY:'  private-value  '},async(url,options)=>{authorization=options.headers.Authorization;return Response.json({choices:[{message:{content:'test'}}]});});assert.equal(assistant.enabled,true);await assistant.reply({messages:[{role:'user',content:'battery'}]});assert.equal(authorization,'Bearer private-value');
 });
