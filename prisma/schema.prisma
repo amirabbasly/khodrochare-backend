@@ -36,6 +36,7 @@ model User {
   identityDocumentId String? @unique
   identityDocument Document? @relation("Identity", fields: [identityDocumentId], references: [id])
   documents Document[] @relation("OwnedDocuments")
+  supportTickets SupportTicket[]
   vehicles Vehicle[]
   sessions Session[]
   requests AssistanceRequest[] @relation("CustomerRequests")
@@ -84,6 +85,11 @@ model Vehicle {
   name String
   plate String
   documents Document[]
+  catalogCarId String?
+  catalogCar MarketCar? @relation(fields:[catalogCarId],references:[id],onDelete:SetNull)
+  productionYear Int?
+  mileage Int @default(0)
+  maintenanceRecords MaintenanceRecord[]
 }
 model AssistanceRequest {
   id String @id @default(uuid())
@@ -295,6 +301,7 @@ model MarketBrand {
   products MarketProduct[]
 }
 model MarketCar {
+  garageVehicles Vehicle[]
   aliases String[] @default([])
   engineCode String?
   transmission String?
@@ -837,4 +844,40 @@ model HallMessage {
   createdAt DateTime @default(now())
   @@unique([conversationId, senderId, clientId])
   @@index([conversationId, createdAt, id])
+}
+
+model MaintenanceRecord {
+  id String @id @default(uuid())
+  vehicleId String
+  vehicle Vehicle @relation(fields:[vehicleId],references:[id],onDelete:Cascade)
+  serviceCode String
+  mileage Int
+  performedAt DateTime
+  intervalKm Int?
+  intervalMonths Int?
+  note String @default("")
+  createdAt DateTime @default(now())
+  @@index([vehicleId,serviceCode,performedAt])
+}
+model SupportTicket {
+  user User @relation(fields:[userId],references:[id],onDelete:Cascade)
+  id String @id @default(uuid())
+  userId String
+  department String
+  subject String
+  status String @default("OPEN")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  messages SupportMessage[]
+  @@index([userId,updatedAt])
+  @@index([status,department,updatedAt])
+}
+model SupportMessage {
+  id String @id @default(uuid())
+  ticketId String
+  ticket SupportTicket @relation(fields:[ticketId],references:[id],onDelete:Cascade)
+  sender String
+  body String
+  createdAt DateTime @default(now())
+  @@index([ticketId,createdAt,id])
 }

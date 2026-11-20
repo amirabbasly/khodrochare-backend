@@ -37,6 +37,8 @@ function carRows(){return carGroups.flatMap(([maker,model,trims,sourceUrl,aliase
 async function bootstrapCatalog(prisma){
   const ids=new Map();
   for(const[slug,name,parent,torobId]of categoryRows){const category=await prisma.marketCategory.upsert({where:{slug},create:{slug,name,parentId:parent?ids.get(parent):null,torobId:torobId||null,sourceUrl:torobId?`https://torob.com/browse/${torobId}/`:null},update:{...(parent?{parentId:ids.get(parent)}:{}),...(torobId?{torobId,sourceUrl:`https://torob.com/browse/${torobId}/`}:{})}});ids.set(slug,category.id);}
-  for(const car of carRows())await prisma.marketCar.upsert({where:{key:car.key},create:car,update:{aliases:car.aliases,...(car.engineCode?{engineCode:car.engineCode,transmission:car.transmission}:{}),sourceUrl:car.sourceUrl,catalogCheckedAt:car.catalogCheckedAt}});
+  const cars=new Map();
+  for(const row of [...require('../../vehicle-catalog').expandedCars(),...carRows()]){const old=cars.get(row.key);cars.set(row.key,{...old,...row,aliases:[...new Set([...(old?.aliases||[]),...row.aliases])]});}
+  for(const car of cars.values())await prisma.marketCar.upsert({where:{key:car.key},create:car,update:{aliases:car.aliases,...(car.engineCode?{engineCode:car.engineCode,transmission:car.transmission}:{}),sourceUrl:car.sourceUrl,catalogCheckedAt:car.catalogCheckedAt}});
 }
 module.exports={categoryRows,carRows,bootstrapCatalog};
