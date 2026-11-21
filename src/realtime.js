@@ -34,7 +34,7 @@ function attachRealtime(io, services, redis, prisma) {
     socket.on('request:tracking', run(async (user, payload) => {
       if (typeof payload?.requestId !== 'string') throw new HttpError(400, 'requestId required');
       const request = await services.ownedRequest(payload.requestId, user);
-      if (['CANCELLED', 'COMPLETED'].includes(request.status)) throw new HttpError(409, 'Tracking has ended');
+      if (['CANCELLED', 'COMPLETED', 'EXPIRED'].includes(request.status)) throw new HttpError(409, 'Tracking has ended');
       return services.tracking(request);
     }));
   });

@@ -1,6 +1,7 @@
 const {HttpError,hash}=require('./domain');
 const {createPayments,lockRequest,settleEarning}=require('./payments');
 const {createZarinpal}=require('./zarinpal');
+const {isRequestExpired}=require('./request-expiry');
 function safePayment(payment,gatewayMode='sandbox'){if(!payment)return null;const{cardNumber,accountName,attempts,...safe}=payment;return{...safe,gatewayMode};}
 function createGatewayPayments(prisma,config,provider=createZarinpal(config)){
   async function releasePending(tx,paymentId,checkoutId){
@@ -16,6 +17,7 @@ function createGatewayPayments(prisma,config,provider=createZarinpal(config)){
         await lockRequest(tx,payment.requestId);
         const request=await tx.assistanceRequest.findUnique({where:{id:payment.requestId}});
         if(request?.status==='CANCELLED')throw new HttpError(409,'Cancelled request cannot be paid');
+        if(request&&isRequestExpired(request))throw new HttpError(409,'Expired request cannot be paid');
         const current=await tx.payment.findUnique({where:{id:payment.id}});
         if(current.status==='VERIFIED'||provider.mode==='sandbox'&&current.status==='SANDBOX_VERIFIED')throw new HttpError(409,'Payment is already verified');
         if(current.status==='SUBMITTED')throw new HttpError(409,'Legacy payment requires review');
@@ -74,7 +76,7 @@ function createGatewayPayments(prisma,config,provider=createZarinpal(config)){
         const latest=await tx.payment.findUnique({where:{id:payment.id}});
         if(latest.status==='VERIFIED'&&checkout.mode==='live')return tx.gatewayCheckout.update({where:{id},data:{status:'DUPLICATE_PAYMENT',errorCode:'REFUND_REVIEW_REQUIRED'}});
         const request=await tx.assistanceRequest.findUnique({where:{id:payment.requestId}});
-        const status=request.status==='CANCELLED'?'REFUND_REQUIRED':checkout.mode==='sandbox'?'SANDBOX_VERIFIED':'VERIFIED';
+        const status=request.status==='CANCELLED'||isRequestExpired(request)?'REFUND_REQUIRED':checkout.mode==='sandbox'?'SANDBOX_VERIFIED':'VERIFIED';
         const livePending=checkout.mode==='sandbox'&&await tx.gatewayCheckout.findFirst({where:{paymentId:payment.id,mode:'live',status:{in:['CREATING','PENDING']}}});
         if(latest.status!=='VERIFIED'&&!livePending)await tx.payment.update({where:{id:payment.id},data:{status,verifiedAt:new Date()}});
         await settleEarning(tx,payment.requestId);

@@ -30,6 +30,18 @@ function database(request) {
   };
   return { prisma: { $transaction: callback => callback(tx) }, tx, attempts, earnings, payment: () => payment };
 }
+
+test('expired and elapsed unswept requests cannot create payments or submit old transfers', async () => {
+  for (const status of ['EXPIRED', 'PENDING']) {
+    const request = { id: 'r', customerId: 'c', driverId: null, service: 'TOWING', priceToman: 1000000, status: 'PENDING', createdAt: new Date() };
+    const db = database(request), payments = createPayments(db.prisma);
+    await payments.getOrCreate('r', 'c');
+    request.status = status; request.createdAt = new Date(Date.now() - 7 * 60 * 60 * 1000);
+    await assert.rejects(payments.getOrCreate('r', 'c'), { status: 409 });
+    await assert.rejects(payments.submit('r', 'c', { bankReference: '1234567890', transferredAt: new Date().toISOString() }), { status: 409 });
+    assert.equal(db.attempts.length, 0); assert.equal(db.earnings.size, 0);
+  }
+});
 test('repair payment requires customer-approved parts and uses the stored total', async () => {
   const request = { id: 'r', customerId: 'c', driverId: 'd', service: 'REPAIR', priceToman: 800000, status: 'ARRIVED', partsApprovedToman: null };
   const db = database(request); const payments = createPayments(db.prisma);

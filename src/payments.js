@@ -1,4 +1,5 @@
 const { HttpError } = require('./domain');
+const { isRequestExpired } = require('./request-expiry');
 function splitAmount(service, serviceToman, partsToman = 0) {
   if (!['REPAIR', 'TOWING'].includes(service)) throw new HttpError(400, 'Unsupported payment service');
   const amountToman = serviceToman + partsToman;
@@ -21,6 +22,7 @@ function createPayments(prisma) {
       const request = await tx.assistanceRequest.findUnique({ where: { id: requestId } });
       if (!request || request.customerId !== customerId) throw new HttpError(404, 'Request not found');
       if (request.status === 'CANCELLED') throw new HttpError(409, 'Cancelled request cannot be paid');
+      if (isRequestExpired(request)) throw new HttpError(409, 'Expired request cannot be paid');
       const existing = await tx.payment.findUnique({ where: { requestId }, include: { attempts: { orderBy: { createdAt: 'desc' }, take: 1 } } });
       if (existing) return existing;
       if (request.priceToman == null) throw new HttpError(409, 'Final service amount requires agreement');
@@ -35,7 +37,7 @@ function createPayments(prisma) {
       const request = await tx.assistanceRequest.findUnique({ where: { id: requestId } });
       if (!request || request.customerId !== customerId) throw new HttpError(404, 'Request not found');
       const payment = await tx.payment.findUnique({ where: { requestId } });
-      if (!payment || request.status === 'CANCELLED' || !['AWAITING_TRANSFER', 'REJECTED'].includes(payment.status)) throw new HttpError(409, 'Payment cannot be submitted in this state');
+      if (!payment || request.status === 'CANCELLED' || isRequestExpired(request) || !['AWAITING_TRANSFER', 'REJECTED'].includes(payment.status)) throw new HttpError(409, 'Payment cannot be submitted in this state');
       const transferredAt = new Date(input.transferredAt);
       if (transferredAt > new Date(Date.now() + 60000) || transferredAt.getTime() < payment.createdAt.getTime() - 60000) throw new HttpError(400, 'Invalid transfer time');
       await tx.paymentAttempt.create({ data: { paymentId: payment.id, bankReference: input.bankReference, transferredAt } });
@@ -51,7 +53,7 @@ function createPayments(prisma) {
       if (!initial) throw new HttpError(404, 'Payment not found');
       await lockRequest(tx, initial.requestId);
       const payment = await tx.payment.findUnique({ where: { id: paymentId }, include: { attempts: { where: { status: 'SUBMITTED' }, orderBy: { createdAt: 'desc' }, take: 1 }, request: true } });
-      if (payment.status !== 'SUBMITTED' || !payment.attempts[0] || payment.request.status === 'CANCELLED') throw new HttpError(409, 'Payment is not awaiting review');
+      if (payment.status !== 'SUBMITTED' || !payment.attempts[0] || payment.request.status === 'CANCELLED' || isRequestExpired(payment.request)) throw new HttpError(409, 'Payment is not awaiting review');
       await tx.paymentAttempt.update({ where: { id: payment.attempts[0].id }, data: { status: approve ? 'APPROVED' : 'REJECTED', reviewedBy: operator.trim(), reviewNote: note.slice(0, 1000), reviewedAt: new Date() } });
       const updated = await tx.payment.update({ where: { id: paymentId }, data: { status: approve ? 'VERIFIED' : 'REJECTED', verifiedAt: approve ? new Date() : null } });
       await settleEarning(tx, payment.requestId);

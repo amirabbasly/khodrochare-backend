@@ -11,6 +11,7 @@ const { cookieToken, setSessionCookie, clearSessionCookie } = require('./session
 const { createCatalog } = require('./catalog');
 const { createGeocoder } = require('./geocoding');
 const { createPayments, lockRequest, settleEarning } = require('./payments');
+const { pendingRequestCutoff, isPendingRequestExpired } = require('./request-expiry');
 
 function createApp({ prisma, redis, config, io, services: s }) {
   const app = express();
@@ -221,16 +222,18 @@ function createApp({ prisma, redis, config, io, services: s }) {
   });
   app.get('/api/v1/requests', auth, async (req, res) => {
     const { page } = z.object({ page: z.coerce.number().int().positive().max(10000).default(1) }).parse(req.query);
-    res.json(await prisma.assistanceRequest.findMany({ where: req.user.role === 'CUSTOMER' ? { customerId: req.user.id } : { driverId: req.user.id }, orderBy: { createdAt: 'desc' }, take: 50, skip: (page - 1) * 50, include: { payment: { select: { status: true } } } }));
+    const rows = await prisma.assistanceRequest.findMany({ where: req.user.role === 'CUSTOMER' ? { customerId: req.user.id } : { driverId: req.user.id }, orderBy: { createdAt: 'desc' }, take: 50, skip: (page - 1) * 50, include: { payment: { select: { status: true } } } });
+    const now = new Date();
+    res.json(rows.map(row => isPendingRequestExpired(row, now) ? { ...row, status: 'EXPIRED' } : row));
   });
   app.get('/api/v1/drivers/requests/available', auth, role('DRIVER'), async (req, res) => {
-    const requests = await prisma.assistanceRequest.findMany({ where: { status: 'PENDING', service: { in: req.user.services } }, select: { id: true, service: true, vehicleName: true, originLat: true, originLng: true, originAddress: true, destinationAddress: true, destinationLat: true, destinationLng: true, distanceMeters: true, priceToman: true, pricingBreakdown: true, createdAt: true }, orderBy: { createdAt: 'desc' }, take: 50 });
+    const requests = await prisma.assistanceRequest.findMany({ where: { status: 'PENDING', driverId: null, createdAt: { gt: pendingRequestCutoff() }, service: { in: req.user.services } }, select: { id: true, service: true, vehicleName: true, originLat: true, originLng: true, originAddress: true, destinationAddress: true, destinationLat: true, destinationLng: true, distanceMeters: true, priceToman: true, pricingBreakdown: true, createdAt: true }, orderBy: { createdAt: 'desc' }, take: 50 });
     res.json(requests);
   });
   app.get('/api/v1/requests/:id', auth, async (req, res) => res.json(await s.ownedRequest(req.params.id, req.user)));
   app.get('/api/v1/requests/:id/tracking', auth, async (req, res) => {
     const request = await s.ownedRequest(req.params.id, req.user);
-    if (['CANCELLED', 'COMPLETED'].includes(request.status)) throw new d.HttpError(409, 'Tracking has ended');
+    if (['CANCELLED', 'COMPLETED', 'EXPIRED'].includes(request.status)) throw new d.HttpError(409, 'Tracking has ended');
     res.json(await s.tracking(request));
   });
   app.post('/api/v1/requests/:id/accept', auth, role('DRIVER'), async (req, res) => {
@@ -241,7 +244,8 @@ function createApp({ prisma, redis, config, io, services: s }) {
       if (!loc || Date.now() - loc.recordedAt.getTime() > config.LOCATION_MAX_AGE_SECONDS * 1000) throw new d.HttpError(409, 'Send a fresh GPS location before accepting');
       const active = await tx.assistanceRequest.count({ where: { driverId: req.user.id, status: { in: ['ACCEPTED', 'ARRIVED'] } } });
       if (active) throw new d.HttpError(409, 'Driver already has an active request');
-      const updated = await tx.assistanceRequest.updateMany({ where: { id: req.params.id, status: 'PENDING', driverId: null, service: { in: req.user.services } }, data: { driverId: req.user.id, status: 'ACCEPTED', acceptedAt: new Date() } });
+      const now = new Date();
+      const updated = await tx.assistanceRequest.updateMany({ where: { id: req.params.id, status: 'PENDING', driverId: null, createdAt: { gt: pendingRequestCutoff(now) }, service: { in: req.user.services } }, data: { driverId: req.user.id, status: 'ACCEPTED', acceptedAt: now } });
       if (!updated.count) throw new d.HttpError(409, 'Request unavailable or unsupported service');
       await tx.outbox.create({ data: { requestId: req.params.id } });
       return tx.assistanceRequest.findUnique({ where: { id: req.params.id } });

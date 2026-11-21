@@ -3,6 +3,7 @@ const { hash, HttpError } = require('./domain');
 const { quote } = require('./pricing');
 const { createCatalog } = require('./catalog');
 const { createGeocoder } = require('./geocoding');
+const { isPendingRequestExpired } = require('./request-expiry');
 function createServices({ prisma, redis, config, io }) {
   const catalog = createCatalog(prisma);
   const geocoder = createGeocoder({ redis, config: config || {} });
@@ -55,7 +56,7 @@ function createServices({ prisma, redis, config, io }) {
   async function ownedRequest(id, user) {
     const request = await prisma.assistanceRequest.findUnique({ where: { id } });
     if (!request || (request.customerId !== user.id && request.driverId !== user.id)) throw new HttpError(404, 'Request not found');
-    return request;
+    return isPendingRequestExpired(request) ? { ...request, status: 'EXPIRED' } : request;
   }
   async function tracking(request) {
     if (!request.driverId) return { driver: null };

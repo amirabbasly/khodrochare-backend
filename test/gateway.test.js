@@ -23,7 +23,7 @@ function database(mode='sandbox',purpose='WALLET'){
   const tx={$queryRaw:async()=>[],gatewayCheckout:{findUnique:async({where})=>checks.find(c=>matches(c,where)),findFirst:async({where})=>checks.find(c=>matches(c,where)),create:async({data})=>{const row={id:'new-'+checks.length,status:'CREATING',errorCode:null,createdAt:new Date(),...data};checks.push(row);return row;},update:async({where,data})=>Object.assign(checks.find(c=>matches(c,where)),data),updateMany:async({where,data})=>{const rows=checks.filter(c=>matches(c,where));rows.forEach(c=>Object.assign(c,data));return{count:rows.length};}},payment:{findUnique:async()=>({...payment}),update:async({data})=>Object.assign(payment,data),updateMany:async({where,data})=>{if(matches(payment,where)){Object.assign(payment,data);return{count:1};}return{count:0};}},assistanceRequest:{findUnique:async()=>({...request,payment})},walletEntry:{create:async({data})=>{assert.equal(entries.some(e=>e.checkoutId===data.checkoutId),false);entries.push(data);},groupBy:async()=>['sandbox','live'].map(mode=>({mode,_sum:{amountToman:entries.filter(e=>e.mode===mode).reduce((s,e)=>s+e.amountToman,0)}})),findMany:async()=>entries},driverEarning:{createMany:async({data})=>earnings.push(...data)},outbox:{create:async()=>{}}};
   const provider={mode,merchant:()=> 'merchant',request:async()=>({authority}),redirect:()=> 'https://sandbox.zarinpal.com/pg/StartPay/'+authority,verify:async()=>{calls++;return{refId:'12345'};}};
   const prisma={...tx,$transaction:fn=>fn(tx)};
-  return{service:createGatewayPayments(prisma,{},provider),checkout,entries,earnings,payment,checks,provider,calls:()=>calls};
+  return{service:createGatewayPayments(prisma,{},provider),checkout,entries,earnings,payment,request,checks,provider,calls:()=>calls};
 }
 test('Sandbox wallet confirmation is idempotent and cannot credit the real balance',async()=>{
   const db=database();await db.service.verify('checkout',authority,'OK');await db.service.verify('checkout',authority,'OK');
@@ -61,4 +61,12 @@ test('Gateway HTTP requires ownership and rejects malformed topups and retired m
   assert.equal((await post('/requests/r/payment/checkout',{},'driver')).status,403);
   assert.equal((await post('/requests/r/payment/report',{})).status,410);
   assert.equal((await fetch(root+'/payments/checkouts/00000000-0000-4000-8000-000000000001',{headers:{Authorization:'Bearer customer'}})).status,404);
+});
+
+
+test('a verified payment callback after request expiry preserves funds for refund review and never credits a driver',async()=>{
+ for(const status of ['EXPIRED','PENDING']){
+  const db=database('live','REQUEST');db.request.status=status;db.request.driverId=null;db.request.createdAt=new Date(Date.now()-7*60*60*1000);
+  const result=await db.service.verify('checkout',authority,'OK');assert.equal(result.status,'REFUND_REQUIRED');assert.equal(db.payment.status,'REFUND_REQUIRED');assert.equal(db.earnings.length,0);assert.equal(db.entries.length,0);assert.equal(db.calls(),1);
+ }
 });
