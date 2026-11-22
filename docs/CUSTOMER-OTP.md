@@ -36,6 +36,18 @@ Without a configured key, OTP endpoints honestly return 503; existing password l
 
 ## Behavior and security
 
+### Diagnosing a 503 after a successful Postman send
+
+Run `node scripts/check-customer-otp.js` inside the running API environment (Docker: `docker compose exec api node scripts/check-customer-otp.js`). This only inspects configuration; it sends no SMS and prints no key, recipient, code or template text. Confirm `apiKeyConfigured`, `matchesSuccessfulPostmanEndpoint`, `usesDefaultTemplate`, and sender `10009611`. The successful Postman URL matches the SDK default. Ensure the running process uses the same key as Postman; changing `.env` alone does not update an existing container's environment. Recreate the API container after configuration or code changes using the existing deployment process.
+
+Retry the application's OTP endpoint once and inspect `docker compose logs --since=5m api` for `Customer OTP SMS:`. Only allowlisted diagnostic fields are logged: `PROVIDER_HTTP_ERROR` with HTTP status, `PROVIDER_REJECTED` with numeric result code (18 means no matching valid template), `TIMEOUT`, `DNS_ERROR`, `CONNECTION_ERROR`, or `PROVIDER_OR_NETWORK_FAILURE`. SDK error text and provider payloads are deliberately excluded because they can contain private information. A successful send is not retried automatically. These diagnostics identify failures; they do not imply a production cause has already been established.
+
+An explicit paid SMS test using the exact production adapter is available:
+`docker compose exec api node scripts/check-customer-otp.js --send-test-sms --phone=09XXXXXXXXX`.
+Replace the phone with an authorized recipient. This sends one random-code message, makes no user/session/database changes, and does not create a usable login code. It prints safe acceptance/failure and duration fields, never the code or key. Default execution without flags still sends nothing. Copy `scripts/check-customer-otp.js` and `src/niazpardaz.js` to the server before rebuilding the API image; recreating an old image cannot add missing source files.
+
+The regression test exercises the complete HTTP OTP route, real migration/Prisma and installed SDK against a local provider HTTP server. The supplied successful Postman envelope returns 200 and creates a usable challenge. A provider HTTP 403 reproduces the application's 503, records FAILED, creates no session and logs only the numeric upstream status. It does not establish why a production upstream returns 403; the production server is not available in the local workspace.
+
 - `/register` collects only a phone number and an OTP; `/login-otp` supports existing customers; `/forgot-password` verifies OTP and changes the password atomically.
 - New users enter the home page immediately after phone verification. Module access redirects to `/complete-profile`, which collects name, valid national-ID checksum and a password, then returns to the requested module. Server authorization also enforces completion. This is phone verification plus validated profile information, not government identity verification.
 - Existing complete customer profiles need no additional form. The old full-registration HTTP endpoint returns 410 and cannot bypass OTP.

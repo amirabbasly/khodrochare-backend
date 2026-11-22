@@ -2,6 +2,8 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { readFile } = require('node:fs/promises');
 const { randomUUID } = require('node:crypto');
+const { createServer } = require('node:http');
+const { NiazpardazSmsClient } = require('niazpardazsms');
 const path = require('node:path');
 const { PGlite } = require('@electric-sql/pglite');
 const { PGLiteSocketServer } = require('@electric-sql/pglite-socket');
@@ -21,14 +23,38 @@ test('Niazpardaz uses the official SDK contract, service sender and exact approv
   await provider.sendCode('09121234567', '123456');
   assert.deepEqual(calls, [['10009611', '09121234567', OTP_TEMPLATE.replace('{code}', '123456')]]);
   for (const result of [{ resultCode: 18, batchSmsId: 0 }, { resultCode: 0, batchSmsId: 0 }]) {
-    await assert.rejects(createNiazpardaz({ NIAZPARDAZ_API_KEY: 'secret' }, () => ({ send: async () => result })).sendCode('09121234567', '123456'), { status: 503 });
+    await assert.rejects(createNiazpardaz({ NIAZPARDAZ_API_KEY: 'secret' }, () => ({ send: async () => result }), () => {}).sendCode('09121234567', '123456'), { status: 503 });
   }
   await assert.rejects(createNiazpardaz({}).sendCode('09121234567', '123456'), { status: 503 });
 });
 
+test('actual installed SDK accepts the successful Postman response and diagnostics exclude credentials, recipients and codes', async () => {
+  const originalFetch = global.fetch, logs = [];
+  try {
+    global.fetch = async (url, options) => {
+      assert.equal(url, 'https://login.niazpardaz.ir/api/v2/RestWebApi/SendBatchSms');
+      assert.equal(options.headers['X-API-Key'], 'private-key');
+      assert.deepEqual(JSON.parse(options.body), { fromNumber: '10009611', messageContent: OTP_TEMPLATE.replace('{code}', '864209'), toNumbers: '09121234567', isFlash: false });
+      return new Response(JSON.stringify({ success: true, result: { batchSmsId: 100111972, resultCode: 0 }, errorMessage: '', adminErrorMessage: '' }));
+    };
+    const provider = createNiazpardaz({ NIAZPARDAZ_API_KEY: 'private-key' }, undefined, detail => logs.push(detail));
+    await provider.sendCode('09121234567', '864209');
+    assert.deepEqual(logs, []);
+    global.fetch = async () => new Response('private-key 09121234567 864209', { status: 401 });
+    await assert.rejects(provider.sendCode('09121234567', '864209'), { status: 503 });
+    assert.deepEqual(logs.pop(), { reason: 'PROVIDER_HTTP_ERROR', httpStatus: 401 });
+    global.fetch = async () => new Response(JSON.stringify({ success: true, result: { resultCode: 18, batchSmsId: 0 } }));
+    await assert.rejects(provider.sendCode('09121234567', '864209'), { status: 503 });
+    assert.deepEqual(logs.pop(), { reason: 'PROVIDER_REJECTED', resultCode: 18 });
+    global.fetch = async () => new Response(JSON.stringify({ success: false, errorMessage: 'private-key 09121234567 864209' }));
+    await assert.rejects(provider.sendCode('09121234567', '864209'), { status: 503 });
+    assert.deepEqual(logs, [{ reason: 'PROVIDER_OR_NETWORK_FAILURE' }]);
+  } finally { global.fetch = originalFetch; }
+});
+
 test('real migration, Prisma and HTTP: phone-only registration, one-time OTP, deferred identity, password recovery and driver isolation', { timeout: 120000 }, async () => {
   const db = await PGlite.create(); const tcp = new PGLiteSocketServer({ db, host: '127.0.0.1', port: 0 });
-  let prisma, server;
+  let prisma, server, providerServer;
   try {
     await db.exec(`CREATE TYPE "Role" AS ENUM ('CUSTOMER','DRIVER');
       CREATE TYPE "Service" AS ENUM ('REPAIR','TOWING','MOBILE_CARWASH','PERIODIC_SERVICE','INSPECTION');
@@ -48,8 +74,25 @@ test('real migration, Prisma and HTTP: phone-only registration, one-time OTP, de
     const redis = { eval: async () => 1 }, disconnected = [];
     const io = { in: room => ({ disconnectSockets: () => disconnected.push(room) }) };
     const services = createServices({ prisma, config, redis, io });
-    const sent = []; let fail = false;
-    const sms = { enabled: true, sendCode: async (phone, code) => { if (fail) throw new Error('provider secret must never leak'); sent.push({ phone, code }); } };
+    const sent = [], diagnostics = []; let fail = false;
+    // Real HTTP transport and the installed SDK; only the external provider is simulated.
+    providerServer = createServer(async (req, res) => {
+      assert.equal(req.method, 'POST');
+      assert.equal(req.url, '/api/v2/RestWebApi/SendBatchSms');
+      assert.equal(req.headers['x-api-key'], config.NIAZPARDAZ_API_KEY);
+      let body = ''; for await (const chunk of req) body += chunk;
+      const payload = JSON.parse(body);
+      assert.equal(payload.fromNumber, '10009611');
+      const code = payload.messageContent.match(/\n(\d{6})\n/)?.[1];
+      assert.match(code || '', /^\d{6}$/);
+      assert.equal(payload.messageContent, OTP_TEMPLATE.replace('{code}', code));
+      res.setHeader('Content-Type', 'application/json');
+      if (fail) { res.writeHead(403); res.end(JSON.stringify({ error: 'provider secret must never leak' })); return; }
+      sent.push({ phone: payload.toNumbers, code });
+      res.end(JSON.stringify({ success: true, result: { batchSmsId: 100111972, resultCode: 0 }, errorMessage: '', adminErrorMessage: '' }));
+    }).listen(0, '127.0.0.1');
+    await new Promise(resolve => providerServer.once('listening', resolve));
+    const sms = createNiazpardaz(config, (key, options) => new NiazpardazSmsClient(key, { ...options, baseUrl: `http://127.0.0.1:${providerServer.address().port}/api/v2/RestWebApi` }), detail => diagnostics.push(detail));
     server = createApp({ prisma, config, redis, io, services, otpSms: sms }).listen(0, '127.0.0.1'); await new Promise(resolve => server.once('listening', resolve));
     const base = `http://127.0.0.1:${server.address().port}/api/v1`;
     async function call(route, body, cookie) {
@@ -96,6 +139,8 @@ test('real migration, Prisma and HTTP: phone-only registration, one-time OTP, de
     const unknown = await send('09121234569', 'LOGIN'); assert.equal((await verify(unknown.data.challengeId, sent.at(-1).code)).status, 400); assert.equal(await prisma.user.findUnique({ where: { role_phone: { role: 'CUSTOMER', phone: '09121234569' } } }), null);
     const expired = await send('09121234560'); await prisma.customerOtpChallenge.update({ where: { id: expired.data.challengeId }, data: { expiresAt: new Date(Date.now() - 1) } }); assert.equal((await verify(expired.data.challengeId, sent.at(-1).code)).status, 400);
     fail = true; const failed = await send('09121234561'); assert.equal(failed.status, 503); assert.equal(JSON.stringify(failed.data).includes('provider secret'), false); assert.equal((await prisma.customerOtpChallenge.findFirst({ where: { phone: '09121234561' } })).status, 'FAILED'); fail = false;
+    assert.deepEqual(diagnostics, [{ reason: 'PROVIDER_HTTP_ERROR', httpStatus: 403 }]);
+    assert.equal((await prisma.session.count({ where: { user: { phone: '09121234561' } } })), 0);
     assert.equal((await call('/auth/customers/register', { fullName: 'بایپس', phone: '09121234562', nationalId: '1234567891', password: 'password123' })).status, 410);
     const service = createCustomerAuth({ prisma, config, services, sms });
     const quotaPhone = '09120000000';
@@ -107,6 +152,7 @@ test('real migration, Prisma and HTTP: phone-only registration, one-time OTP, de
     const row = await prisma.user.findUnique({ where: { id: success.data.user.id } }); assert.ok(await verifyPassword('recoveredPassword123', row.passwordHash));
   } finally {
     if (server) await new Promise(resolve => server.close(resolve));
+    if (providerServer) await new Promise(resolve => providerServer.close(resolve));
     if (prisma) await prisma.$disconnect();
     await tcp.stop(); await db.close();
   }
