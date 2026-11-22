@@ -1,6 +1,11 @@
 require('dotenv').config({ quiet: true });
 const { z } = require('zod');
 const config = z.object({
+  NIAZPARDAZ_API_KEY: z.string().trim().default(''),
+  NIAZPARDAZ_SENDER: z.string().regex(/^\d{4,20}$/).default('10009611'),
+  NIAZPARDAZ_BASE_URL: z.string().url().startsWith('https://').optional(),
+  NIAZPARDAZ_OTP_TEMPLATE: z.string().refine(value => value.includes('{code}'), 'OTP template must contain {code}').optional(),
+  OTP_HMAC_SECRET: z.string().min(32).optional(),
   GAPGPT_API_KEY: z.string().trim().default(''),
   GAPGPT_MODEL: z.string().trim().min(1).max(100).default('gpt-4o'),
   ASSISTANT_SUPPORT_PHONE: z.string().regex(/^0\d{7,14}$/).default('09123022064'),

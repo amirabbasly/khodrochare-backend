@@ -12,8 +12,9 @@ const { createCatalog } = require('./catalog');
 const { createGeocoder } = require('./geocoding');
 const { createPayments, lockRequest, settleEarning } = require('./payments');
 const { pendingRequestCutoff, isPendingRequestExpired } = require('./request-expiry');
+const { requiresCompleteProfile } = require('./customer-profile');
 
-function createApp({ prisma, redis, config, io, services: s }) {
+function createApp({ prisma, redis, config, io, services: s, otpSms }) {
   const app = express();
   const catalog = createCatalog(prisma);
   const geocoder = createGeocoder({ redis, config });
@@ -33,6 +34,7 @@ function createApp({ prisma, redis, config, io, services: s }) {
         // Refresh persistent cookies only; explicit logout always removes them.
         if (cookieToken(req.headers.cookie, req.user.role)) setSessionCookie(res, session, config, req.get("X-Session-Persistence") !== "browser");
       } else req.user = await s.authenticate(req.token);
+      if (requiresCompleteProfile(req)) return res.status(403).json({ error: 'برای استفاده از این بخش، مشخصات هویتی حساب را تکمیل کنید.', code: 'PROFILE_INCOMPLETE' });
       next();
     } catch (e) { next(e); }
   };
@@ -45,6 +47,7 @@ function createApp({ prisma, redis, config, io, services: s }) {
       next();
     } catch (e) { next(e); }
   };
+  require('./customer-auth').registerCustomerAuth({ app, prisma, config, services: s, auth, role, limit, io, sms: otpSms });
   app.get('/health/live', (req, res) => res.json({ status: 'ok' }));
   require('./gateway-routes').registerGateway({app,prisma,config,auth,role,limit});
   app.get('/health/ready', async (req, res) => {
@@ -94,6 +97,7 @@ function createApp({ prisma, redis, config, io, services: s }) {
   });
   for (const [slug, userRole, schema] of [['customers', 'CUSTOMER', d.customerRegistration], ['drivers', 'DRIVER', d.driverRegistration]]) {
     app.post(`/api/v1/auth/${slug}/register`, limit('register', 10, 3600), async (req, res) => {
+      if (userRole === 'CUSTOMER') throw new d.HttpError(410, 'ثبت‌نام مشتری فقط با تأیید شماره همراه انجام می‌شود.');
       const input = schema.parse(req.body);
       const passwordHash = await d.hashPassword(input.password);
       const user = await prisma.$transaction(async tx => {

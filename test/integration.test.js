@@ -50,9 +50,12 @@ test('real PostGIS / Redis / HTTP / Socket.IO lifecycle', { skip: !enabled, time
     // Test data is unique per run; national identity uniqueness is scoped by role.
     const existing = await prisma.user.findMany({ where: { nationalId: { in: ['1234567891', '9876543210'] } } });
     assert.equal(existing.length, 0, 'Run with fresh isolated test volumes');
-    const customer = await call('/auth/customers/register', { method: 'POST', body: input, status: 201 });
+    // OTP is covered by customer-otp.test.js; seed this independent dispatch lifecycle.
+    const { password, ...identity } = input;
+    await prisma.user.create({ data: { ...identity, role: 'CUSTOMER', services: [], passwordHash: await require('../src/domain').hashPassword(password) } });
+    const customer = await call('/auth/customers/login', { method: 'POST', body: { phone: input.phone, password } });
     assert.equal(customer.user.passwordHash, undefined);
-    await call('/auth/customers/register', { method: 'POST', body: input, status: 409 });
+    await call('/auth/customers/register', { method: 'POST', body: input, status: 410 });
     await call('/auth/drivers/login', { method: 'POST', body: { phone: input.phone, password: input.password }, status: 401 });
     const login = await call('/auth/customers/login', { method: 'POST', body: { phone: input.phone, password: input.password } });
     assert.ok(login.token);

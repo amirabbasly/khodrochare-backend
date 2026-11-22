@@ -8,6 +8,7 @@ const { createServices } = require('./services');
 const { createApp } = require('./app');
 const { attachRealtime } = require('./realtime');
 const { expirePendingRequests } = require('./request-expiry');
+const { cleanupCustomerOtps } = require('./customer-auth');
 const prisma = new PrismaClient();
 const redis = new Redis(config.REDIS_URL, { maxRetriesPerRequest: 2 });
 const jobsRedis = new Redis(config.REDIS_URL, { maxRetriesPerRequest: null });
@@ -44,7 +45,12 @@ async function dispatch() {
   } catch (e) { console.error('Outbox:', e.message); }
   finally { dispatching = false; }
 }
-let timer, expiryTimer, expiring = null;
+let timer, expiryTimer, otpCleanupTimer, otpCleaning = null, expiring = null;
+function cleanupOtps() {
+  if (otpCleaning) return otpCleaning;
+  otpCleaning = cleanupCustomerOtps(prisma).catch(error => console.error('OTP cleanup:', error.code || 'FAILED')).finally(() => { otpCleaning = null; });
+  return otpCleaning;
+}
 function expire() {
   if (expiring) return expiring;
   expiring = expirePendingRequests(prisma).catch(error => console.error('Request expiry:', error.message)).finally(() => { expiring = null; });
@@ -55,6 +61,8 @@ async function start() {
   await redis.ping();
   await expire();
   expiryTimer = setInterval(expire, 15000);
+  void cleanupOtps();
+  otpCleanupTimer = setInterval(cleanupOtps, 3600000);
   timer = setInterval(dispatch, 2000);
   server.listen(config.PORT, '0.0.0.0', () => console.log(`API listening on ${config.PORT}`));
 }
@@ -64,11 +72,13 @@ async function stop() {
   closing = true;
   clearInterval(timer);
   clearInterval(expiryTimer);
+  clearInterval(otpCleanupTimer);
   const timeout = setTimeout(() => process.exit(1), 25000).unref();
   await new Promise(resolve => io.close(resolve));
   await worker.close();
   await queue.close();
   if (expiring) await expiring;
+  if (otpCleaning) await otpCleaning;
   await Promise.all([redis.quit(), jobsRedis.quit(), prisma.$disconnect()]);
   clearTimeout(timeout);
 }

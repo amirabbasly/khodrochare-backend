@@ -4,14 +4,15 @@ const { quote } = require('./pricing');
 const { createCatalog } = require('./catalog');
 const { createGeocoder } = require('./geocoding');
 const { isPendingRequestExpired } = require('./request-expiry');
+const { customerFlags } = require('./customer-profile');
 function createServices({ prisma, redis, config, io }) {
   const catalog = createCatalog(prisma);
   const geocoder = createGeocoder({ redis, config: config || {} });
-  const safeUser = u => { const { passwordHash, ...safe } = u; return safe; };
-  async function session(user) {
+  const safeUser = u => { const { passwordHash, ...safe } = u; return { ...safe, ...customerFlags(u) }; };
+  async function session(user, db = prisma) {
     const token = randomBytes(32).toString('hex');
     const expiresAt = new Date(Date.now() + config.SESSION_DAYS * 86400000);
-    await prisma.session.create({ data: { tokenHash: hash(token), userId: user.id, expiresAt } });
+    await db.session.create({ data: { tokenHash: hash(token), userId: user.id, expiresAt } });
     return { token, expiresAt, user: safeUser(user) };
   }
   async function authenticateSession(token) {
@@ -24,7 +25,7 @@ function createServices({ prisma, redis, config, io }) {
       expiresAt = new Date(Date.now() + lifetime);
       await prisma.session.update({ where: { tokenHash: hash(token) }, data: { expiresAt } });
     }
-    return { user: found.user, expiresAt, token };
+    return { user: found.user.role === 'CUSTOMER' ? { ...found.user, ...customerFlags(found.user) } : found.user, expiresAt, token };
   }
   async function authenticate(token) { return (await authenticateSession(token)).user; }
   async function claimDocument(tx, ref, userId, vehicleId) {

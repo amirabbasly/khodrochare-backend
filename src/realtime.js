@@ -13,6 +13,7 @@ function attachRealtime(io, services, redis, prisma) {
     const run = handler => async (payload, ack) => {
       try {
         const user = await services.authenticate(socket.data.token);
+        if (user.role === 'CUSTOMER' && user.profileComplete === false) throw new HttpError(403, 'برای استفاده از این بخش، مشخصات هویتی حساب را تکمیل کنید.');
         const result = await handler(user, payload);
         if (typeof ack === 'function') ack({ ok: true, data: result });
       } catch (e) {

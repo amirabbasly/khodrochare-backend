@@ -38,4 +38,4 @@ function priceFor(distance, base, perKm) {
 class HttpError extends Error {
   constructor(status, message) { super(message); this.status = status; }
 }
-module.exports = { services, phone, documentRef, vehicle, customerRegistration, driverRegistration, point, towing, repair, location, hash, hashPassword, verifyPassword, priceFor, HttpError, validNationalId };
+module.exports = { services, phone, documentRef, vehicle, customerRegistration, driverRegistration, point, towing, repair, location, hash, hashPassword, verifyPassword, priceFor, HttpError, validNationalId, digits };
