@@ -1,7 +1,9 @@
 const { NiazpardazSmsClient, SendResultCode } = require('niazpardazsms');
 const { HttpError } = require('./domain');
+const { createHttpsSmsClient } = require('./niazpardaz-https');
 const OTP_TEMPLATE = 'کد تأیید شما برای ورود به اپلیکیشن خودروچاره:\n{code}\nلطفاً این کد را در اختیار دیگران قرار ندهید.';
-function createNiazpardaz(config, createClient = (key, options) => new NiazpardazSmsClient(key, options), report = detail => console.error('Customer OTP SMS:', detail)) {
+function createNiazpardaz(config, createClient, report = detail => console.error('Customer OTP SMS:', detail)) {
+  createClient ||= config.NIAZPARDAZ_TRANSPORT === 'https' ? createHttpsSmsClient : (key, options) => new NiazpardazSmsClient(key, options);
   const key = (config.NIAZPARDAZ_API_KEY || '').trim();
   const template = (config.NIAZPARDAZ_OTP_TEMPLATE || OTP_TEMPLATE).replace(/\\n/g, '\n');
   const enabled = Boolean(key && template.includes('{code}'));

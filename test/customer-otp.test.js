@@ -3,6 +3,8 @@ const assert = require('node:assert/strict');
 const { readFile } = require('node:fs/promises');
 const { randomUUID } = require('node:crypto');
 const { createServer } = require('node:http');
+const { request: httpRequest } = require('node:http');
+const { createHttpsSmsClient } = require('../src/niazpardaz-https');
 const { NiazpardazSmsClient } = require('niazpardazsms');
 const path = require('node:path');
 const { PGlite } = require('@electric-sql/pglite');
@@ -13,6 +15,49 @@ const { createApp } = require('../src/app');
 const { createServices } = require('../src/services');
 const { createCustomerAuth } = require('../src/customer-auth');
 const { hashPassword, verifyPassword } = require('../src/domain');
+
+test('native HTTPS transport preserves the wire payload, rejects failures without retries and times out stalled bodies', async () => {
+  let mode = 'ok', requests = 0;
+  const server = createServer(async (req, res) => {
+    requests++;
+    let body = ''; for await (const chunk of req) body += chunk;
+    assert.equal(req.url, '/api/v2/RestWebApi/SendBatchSms');
+    assert.equal(req.headers['x-api-key'], 'test-private-key');
+    assert.equal(req.headers['sec-fetch-mode'], undefined);
+    assert.equal(Number(req.headers['content-length']), Buffer.byteLength(body));
+    assert.deepEqual(JSON.parse(body), { fromNumber: '10009611', messageContent: OTP_TEMPLATE.replace('{code}', '864209'), toNumbers: '09121234567', isFlash: false });
+    if (mode === '403' || mode === '302') { res.writeHead(Number(mode), { location: 'https://other.invalid' }); res.end('private details'); return; }
+    if (mode === 'slow') { res.writeHead(200); res.write('{'); return; }
+    if (mode === 'large') { res.end('x'.repeat(70000)); return; }
+    if (mode === 'invalid') { res.end('not-json'); return; }
+    res.end(JSON.stringify({ success: mode !== 'rejected', result: { resultCode: 0, batchSmsId: 100111972 } }));
+  }).listen(0, '127.0.0.1');
+  await new Promise(resolve => server.once('listening', resolve));
+  // Exercise real request/response streams over loopback HTTP, without weakening
+  // TLS verification in the production HTTPS implementation.
+  const request = (url, options, callback) => {
+    const local = new URL(url); local.protocol = 'http:';
+    return httpRequest(local, options, callback);
+  };
+  const client = createHttpsSmsClient('test-private-key', { baseUrl: `https://127.0.0.1:${server.address().port}/api/v2/RestWebApi`, timeout: 250 }, request);
+  const send = () => client.send('10009611', '09121234567', OTP_TEMPLATE.replace('{code}', '864209'));
+  try {
+    assert.deepEqual(await send(), { resultCode: 0, batchSmsId: 100111972 });
+    const https = require('node:https'), originalRequest = https.request;
+    let configured;
+    try {
+      https.request = request;
+      configured = createNiazpardaz({ NIAZPARDAZ_API_KEY: 'test-private-key', NIAZPARDAZ_TRANSPORT: 'https', NIAZPARDAZ_BASE_URL: `https://127.0.0.1:${server.address().port}/api/v2/RestWebApi` });
+    } finally { https.request = originalRequest; }
+    await configured.sendCode('09121234567', '864209');
+    for (const next of ['403', '302', 'invalid', 'rejected', 'large', 'slow']) {
+      mode = next; const before = requests;
+      await assert.rejects(send(), next === '403' || next === '302' ? { errorCode: Number(next) } : undefined);
+      assert.equal(requests, before + 1, 'Never retry SMS or forward its key to redirects');
+    }
+    assert.throws(() => createHttpsSmsClient('key', { baseUrl: 'http://example.invalid' }), /Invalid SMS HTTPS/);
+  } finally { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); }
+});
 
 test('Niazpardaz uses the official SDK contract, service sender and exact approved text; provider errors are never success', async () => {
   const calls = [];
