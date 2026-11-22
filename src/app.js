@@ -122,7 +122,7 @@ function createApp({ prisma, redis, config, io, services: s, otpSms }) {
       const user = await prisma.user.findUnique({ where: { role_phone: { role: userRole, phone: input.phone } } });
       const fallback = '00000000000000000000000000000000:' + '00'.repeat(64);
       const correct = await d.verifyPassword(input.password, user?.passwordHash || fallback);
-      if (!user || !correct) throw new d.HttpError(401, 'Invalid phone or password');
+      if (!user || user.deletedAt || !correct) throw new d.HttpError(401, 'Invalid phone or password');
       const session = await s.session(user);
       setSessionCookie(res, session, config, input.remember);
       res.json(session);

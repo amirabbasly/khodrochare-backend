@@ -27,6 +27,8 @@ The official `niazpardazsms` SDK's `send(sender, recipient, text)` accepts full 
 
 ## Deploy
 
+Production incident resolved on 2026-11-22: the configured `login.niazpardaz.ir` endpoint returned ArvanCloud HTML HTTP 403 (IP/location denied) from both host curl and container Node. With the account owner's explicit approval, the alternative REST base listed in the provider documentation was validated using GetCredit and a real SMS send. This deployment now uses `NIAZPARDAZ_BASE_URL=https://www.payamak.vip/api/v2/RestWebApi` with the existing SDK transport. The public OTP endpoint returned HTTP 200 with a five-minute challenge, and its persisted state was SENT. Preserve that environment setting during redeployments; do not reset it to the SDK default. Provider acceptance was verified; handset delivery and entering the received code require the recipient. No credentials belong in this document.
+
 1. Install locked dependencies with `npm ci` and generate Prisma client with `npm run prisma:generate`.
 2. Back up the database using the existing deployment procedure, then run `npm run db:migrate` before starting the new backend.
 3. Restart the backend with the server environment above; build and deploy the customer app using its existing pipeline. No driver frontend deployment is needed.

@@ -3,6 +3,9 @@ const { z } = require('zod');
 const d = require('./domain');
 const { profileComplete } = require('./customer-profile');
 const { createNiazpardaz } = require('./niazpardaz');
+const { assertDeletable, eraseCustomer } = require('./customer-deletion');
+const fs = require('node:fs/promises');
+const path = require('node:path');
 const { setSessionCookie, clearSessionCookie } = require('./session-cookies');
 const OTP_SECONDS = 300, RESEND_SECONDS = 60, MAX_ATTEMPTS = 5;
 const invalidCode = () => new d.HttpError(400, 'کد تأیید نادرست است یا مهلت آن تمام شده؛ کد جدید دریافت کنید.');
@@ -37,11 +40,24 @@ function createCustomerAuth({ prisma, config, services, sms = createNiazpardaz(c
     return { challengeId: id, expiresInSeconds: Math.max(0, Math.floor((expiresAt - now()) / 1000)), retryAfterSeconds: Math.max(0, Math.ceil((at.getTime() + RESEND_SECONDS * 1000 - now().getTime()) / 1000)) };
   }
 
-  async function consume(input, reset = false) {
+  async function requestDeletion(userId) {
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user || user.role !== 'CUSTOMER' || user.deletedAt) throw new d.HttpError(401, 'Authentication required');
+    await assertDeletable(prisma, userId);
+    return requestCode({ phone: user.phone, purpose: 'DELETE_ACCOUNT' });
+  }
+
+  async function consume(input, reset = false, deletionUserId = null) {
     const outcome = await prisma.$transaction(async tx => {
       await tx.$queryRaw`SELECT id FROM "CustomerOtpChallenge" WHERE id=${input.challengeId} FOR UPDATE`;
       const challenge = await tx.customerOtpChallenge.findUnique({ where: { id: input.challengeId } });
-      if (!secret || !challenge || challenge.status !== 'SENT' || challenge.expiresAt <= now() || challenge.attempts >= MAX_ATTEMPTS || (reset ? challenge.purpose !== 'RESET_PASSWORD' : !['REGISTER', 'LOGIN'].includes(challenge.purpose))) return { error: invalidCode() };
+      if (!secret || !challenge || challenge.status !== 'SENT' || challenge.expiresAt <= now() || challenge.attempts >= MAX_ATTEMPTS || (deletionUserId ? challenge.purpose !== 'DELETE_ACCOUNT' : reset ? challenge.purpose !== 'RESET_PASSWORD' : !['REGISTER', 'LOGIN'].includes(challenge.purpose))) return { error: invalidCode() };
+      let deletingUser;
+      if (deletionUserId) {
+        await tx.$queryRaw`SELECT id FROM "User" WHERE id=${deletionUserId} FOR UPDATE`;
+        deletingUser = await tx.user.findUnique({ where: { id: deletionUserId } });
+        if (!deletingUser || deletingUser.role !== 'CUSTOMER' || deletingUser.deletedAt || deletingUser.phone !== challenge.phone) return { error: invalidCode() };
+      }
       const expected = Buffer.from(challenge.codeHash, 'hex');
       const actual = Buffer.from(otpHash(secret, challenge.id, challenge.phone, challenge.purpose, input.code), 'hex');
       if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) {
@@ -50,6 +66,7 @@ function createCustomerAuth({ prisma, config, services, sms = createNiazpardaz(c
         return { error: invalidCode() }; // Commit failed-attempt counters before throwing.
       }
       await tx.customerOtpChallenge.update({ where: { id: challenge.id }, data: { status: 'USED', consumedAt: now() } });
+      if (deletingUser) return eraseCustomer(tx, deletingUser, now());
       let user = await tx.user.findUnique({ where: { role_phone: { role: 'CUSTOMER', phone: challenge.phone } } });
       if (reset) {
         if (!user) return { error: new d.HttpError(400, 'برای این شماره حساب مشتری وجود ندارد؛ ابتدا ثبت‌نام کنید.') };
@@ -62,6 +79,9 @@ function createCustomerAuth({ prisma, config, services, sms = createNiazpardaz(c
       if (!user) user = await tx.user.upsert({ where: { role_phone: { role: 'CUSTOMER', phone: challenge.phone } }, create: { role: 'CUSTOMER', phone: challenge.phone, fullName: 'کاربر خودرو چاره', nationalId: null, passwordHash: null, services: [], phoneVerifiedAt: now() }, update: { phoneVerifiedAt: now() } });
       else user = await tx.user.update({ where: { id: user.id }, data: { phoneVerifiedAt: now() } });
       return { session: await services.session(user, tx) };
+    }, deletionUserId ? { isolationLevel: 'Serializable' } : undefined).catch(error => {
+      if (deletionUserId && error.code === 'P2034') throw new d.HttpError(409, 'وضعیت حساب هم‌زمان تغییر کرد؛ دوباره حذف حساب را تأیید کنید.');
+      throw error;
     });
     if (outcome.error) throw outcome.error;
     return outcome;
@@ -79,13 +99,31 @@ function createCustomerAuth({ prisma, config, services, sms = createNiazpardaz(c
       return services.safeUser(updated);
     });
   }
-  return { requestCode, consume, completeProfile };
+  return { requestCode, requestDeletion, consume, completeProfile };
 }
 
 function registerCustomerAuth({ app, prisma, config, services, auth, role, limit, io, sms }) {
   const service = createCustomerAuth({ prisma, config, services, sms });
   const root = '/api/v1/auth/customers';
   const codeInput = { challengeId: z.string().uuid(), code: z.string().transform(d.digits).pipe(z.string().regex(/^\d{6}$/)) };
+  app.post('/api/v1/me/account-deletion/otp', auth, role('CUSTOMER'), limit('customer-delete-send', 10, 3600), async (req, res) => {
+    z.object({}).strict().parse(req.body);
+    res.set('Cache-Control', 'no-store').json(await service.requestDeletion(req.user.id));
+  });
+  app.delete('/api/v1/me', auth, role('CUSTOMER'), limit('customer-delete-confirm', 20, 900), async (req, res) => {
+    const input = z.object({ ...codeInput, confirmation: z.literal('DELETE') }).strict().parse(req.body);
+    const { deletedUserId, removedFiles } = await service.consume(input, false, req.user.id);
+    clearSessionCookie(res, 'CUSTOMER', config);
+    io.in(`user:${deletedUserId}`).disconnectSockets(true);
+    // The database revokes access atomically; delete private disk files only
+    // after commit. Never resolve an arbitrary path from a stored key.
+    for (const key of removedFiles) {
+      if (!key || path.basename(key) !== key || !/^[a-zA-Z0-9-]+$/.test(key)) continue;
+      try { await fs.unlink(path.join(config.UPLOAD_DIR, key)); }
+      catch (error) { if (error.code !== 'ENOENT') console.error('Deleted account file cleanup:', error.code || 'FAILED'); }
+    }
+    res.set('Cache-Control', 'no-store').json({ deleted: true });
+  });
   app.post(root + '/otp/request', limit('customer-otp-send', 20, 3600), async (req, res) => {
     const input = z.object({ phone: d.phone, purpose: z.enum(['REGISTER', 'LOGIN', 'RESET_PASSWORD']) }).strict().parse(req.body);
     res.set('Cache-Control', 'no-store').json(await service.requestCode(input));

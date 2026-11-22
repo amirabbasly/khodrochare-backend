@@ -18,7 +18,7 @@ function createServices({ prisma, redis, config, io }) {
   async function authenticateSession(token) {
     if (typeof token !== 'string' || !/^[a-f0-9]{64}$/.test(token)) throw new HttpError(401, 'Authentication required');
     const found = await prisma.session.findUnique({ where: { tokenHash: hash(token) }, include: { user: true } });
-    if (!found || found.expiresAt <= new Date()) throw new HttpError(401, 'Session expired');
+    if (!found || found.user.deletedAt || found.expiresAt <= new Date()) throw new HttpError(401, 'Session expired');
     let expiresAt = found.expiresAt;
     const lifetime = config?.SESSION_DAYS * 86400000;
     if (lifetime && expiresAt.getTime() - Date.now() < lifetime / 2) {
