@@ -3,6 +3,7 @@ const multer=require('multer');const fs=require('node:fs/promises');const path=r
 const {HttpError,hash}=require('../domain');
 const {createHall,listingDto,include,lock}=require('./service');
 const {draftSchema,priceInput,planSchema,bannerSchema,normalize,phone}=require('./domain');
+const {prepareHallPhoto,MAX_PHOTO_BYTES,photoSizeMessage,photoFormatMessage}=require('./photos');
 const uuid=z.string().uuid(),pageSchema=z.object({page:z.coerce.number().int().min(1).max(10000).default(1),limit:z.coerce.number().int().min(1).max(48).default(12)});
 const pagination=q=>({skip:(q.page-1)*q.limit,take:q.limit});
 function registerHall({app,prisma,redis,config,auth,admin,limit,io,sms}){
@@ -59,12 +60,13 @@ function registerHall({app,prisma,redis,config,auth,admin,limit,io,sms}){
   });
   app.get(root+'/mine/:id/inquiries',auth,async(req,res)=>{await service.owned(uuid.parse(req.params.id),req.user.id);res.set('Cache-Control','no-store').json({items:await prisma.hallInquiry.findMany({where:{listingId:req.params.id},orderBy:{createdAt:'desc'},take:100})});});
   app.get(root+'/mine/:id/orders',auth,async(req,res)=>{await service.owned(uuid.parse(req.params.id),req.user.id);res.set('Cache-Control','no-store').json({items:(await prisma.hallOrder.findMany({where:{listingId:req.params.id},orderBy:{createdAt:'desc'}})).map(service.orderDto)});});
-  const upload=multer({storage:multer.memoryStorage(),limits:{fileSize:5*1024*1024,files:1,fields:0}});
-  app.post(root+'/mine/:id/photos',auth,limit('hall-photo',60,3600),(req,res,next)=>upload.single('file')(req,res,error=>next(error?new HttpError(400,'تصویر JPEG یا PNG تا ۵ مگابایت انتخاب کنید.'):undefined)),async(req,res)=>{
+  const upload=multer({storage:multer.memoryStorage(),limits:{fileSize:MAX_PHOTO_BYTES,files:1,fields:0}});
+  app.post(root+'/mine/:id/photos',auth,limit('hall-photo',60,3600),(req,res,next)=>upload.single('file')(req,res,error=>next(error?new HttpError(400,error.code==='LIMIT_FILE_SIZE'?photoSizeMessage:photoFormatMessage):undefined)),async(req,res)=>{
     const id=uuid.parse(req.params.id),buffer=req.file?.buffer;
-    const mimeType=buffer?.subarray(0,3).equals(Buffer.from([255,216,255]))?'image/jpeg':buffer?.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]))?'image/png':null;
-    if(!mimeType)throw new HttpError(400,'تصویر JPEG یا PNG با حجم کمتر از ۵ مگابایت انتخاب کنید.');
-    const key='hall-'+randomUUID(),filename=path.resolve(config.UPLOAD_DIR,key);await fs.mkdir(config.UPLOAD_DIR,{recursive:true});await fs.writeFile(filename,buffer,{flag:'wx',mode:0o600});
+    // Check ownership and remaining slots before spending CPU on image decoding.
+    const owned=await service.owned(id,req.user.id);if(owned.photos.length>=5)throw new HttpError(400,'حداکثر ۵ تصویر مجاز است.');
+    const prepared=await prepareHallPhoto(buffer),mimeType=prepared.mimeType;
+    const key='hall-'+randomUUID(),filename=path.resolve(config.UPLOAD_DIR,key);await fs.mkdir(config.UPLOAD_DIR,{recursive:true});await fs.writeFile(filename,prepared.buffer,{flag:'wx',mode:0o600});
     try{const photo=await prisma.$transaction(async tx=>{await lock(tx,id);const row=await service.owned(id,req.user.id,tx);await service.editable(tx,row);if(row.photos.length>=5)throw new HttpError(400,'حداکثر ۵ تصویر مجاز است.');await service.photosChanged(tx,row);return tx.hallPhoto.create({data:{listingId:id,storageKey:key,mimeType,position:row.photos.length}});});res.status(201).json({id:photo.id,url:`/hall/photos/${photo.id}?token=${photo.readToken}`});}catch(e){await fs.unlink(filename).catch(()=>{});throw e;}
   });
   app.delete(root+'/mine/:id/photos/:photoId',auth,async(req,res)=>{
