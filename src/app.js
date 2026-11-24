@@ -19,6 +19,7 @@ function createApp({ prisma, redis, config, io, services: s, otpSms }) {
   const catalog = createCatalog(prisma);
   const geocoder = createGeocoder({ redis, config });
   const payments = createPayments(prisma);
+  const cashPayments = require('./cash-payments').createCashPayments(prisma);
   app.disable('x-powered-by');
   app.set('trust proxy', config.TRUST_PROXY);
   app.use(helmet());
@@ -48,6 +49,8 @@ function createApp({ prisma, redis, config, io, services: s, otpSms }) {
     } catch (e) { next(e); }
   };
   require('./customer-auth').registerCustomerAuth({ app, prisma, config, services: s, auth, role, limit, io, sms: otpSms });
+  require('./driver-auth').registerDriverAuth({ app, prisma, config, services: s, limit, io, sms: otpSms });
+  require('./operator/routes').registerOperator({app,prisma,redis,config,io,limit});
   app.get('/health/live', (req, res) => res.json({ status: 'ok' }));
   require('./gateway-routes').registerGateway({app,prisma,config,auth,role,limit});
   app.get('/health/ready', async (req, res) => {
@@ -65,7 +68,7 @@ function createApp({ prisma, redis, config, io, services: s, otpSms }) {
     const { q } = z.object({ q: z.string().trim().min(3).max(150) }).parse(req.query);
     res.json(await geocoder.search(q));
   });
-  require('./monitoring').registerMonitoring({ app, prisma, redis, config, auth, limit, geocoder, io });
+  require('./monitoring').registerMonitoring({ app, prisma, redis, config, auth, limit, geocoder, io, sms: otpSms });
   app.post('/api/v1/locations/reverse', auth, limit('reverse', 60, 60), async (req, res) => {
     const point = d.point.parse(req.body);
     const place = await geocoder.resolve(null, point);
@@ -95,34 +98,16 @@ function createApp({ prisma, redis, config, io, services: s, otpSms }) {
     if (!doc) throw new d.HttpError(404, 'Document not found');
     res.set('Cache-Control', 'no-store').type(doc.mimeType).sendFile(path.resolve(config.UPLOAD_DIR, doc.storageKey));
   });
-  for (const [slug, userRole, schema] of [['customers', 'CUSTOMER', d.customerRegistration], ['drivers', 'DRIVER', d.driverRegistration]]) {
-    app.post(`/api/v1/auth/${slug}/register`, limit('register', 10, 3600), async (req, res) => {
-      if (userRole === 'CUSTOMER') throw new d.HttpError(410, 'ثبت‌نام مشتری فقط با تأیید شماره همراه انجام می‌شود.');
-      const input = schema.parse(req.body);
-      const passwordHash = await d.hashPassword(input.password);
-      const user = await prisma.$transaction(async tx => {
-        const user = await tx.user.create({ data: { role: userRole, fullName: input.fullName, phone: input.phone, nationalId: input.nationalId, passwordHash, vehiclePlate: input.vehiclePlate, vehicleType: input.vehicleType, services: input.services || [] } });
-        if (input.identityDocument) {
-          await s.claimDocument(tx, input.identityDocument, user.id);
-          await tx.user.update({ where: { id: user.id }, data: { identityDocumentId: input.identityDocument.id } });
-          user.identityDocumentId = input.identityDocument.id;
-        }
-        for (const car of input.vehicles || []) {
-          const vehicle = await tx.vehicle.create({ data: { userId: user.id, name: car.name, plate: car.plate } });
-          for (const document of car.documents) await s.claimDocument(tx, document, user.id, vehicle.id);
-        }
-        return user;
-      });
-      const session = await s.session(user);
-      setSessionCookie(res, session, config);
-      res.status(201).json(session);
-    });
+  app.post('/api/v1/auth/customers/register', limit('register', 10, 3600), async () => {
+    throw new d.HttpError(410, 'ثبت‌نام مشتری فقط با تأیید شماره همراه انجام می‌شود.');
+  });
+  for (const [slug, userRole] of [['customers', 'CUSTOMER'], ['drivers', 'DRIVER']]) {
     app.post(`/api/v1/auth/${slug}/login`, limit('login', 10, 900), async (req, res) => {
       const input = z.object({ phone: d.phone, password: z.string().min(1).max(128), remember: z.boolean().default(true) }).strict().parse(req.body);
       const user = await prisma.user.findUnique({ where: { role_phone: { role: userRole, phone: input.phone } } });
       const fallback = '00000000000000000000000000000000:' + '00'.repeat(64);
       const correct = await d.verifyPassword(input.password, user?.passwordHash || fallback);
-      if (!user || user.deletedAt || !correct) throw new d.HttpError(401, 'Invalid phone or password');
+      if (!user || user.isActive === false || user.deletedAt || !correct) throw new d.HttpError(401, 'Invalid phone or password');
       const session = await s.session(user);
       setSessionCookie(res, session, config, input.remember);
       res.json(session);
@@ -155,6 +140,11 @@ function createApp({ prisma, redis, config, io, services: s, otpSms }) {
     });
     res.status(204).end();
   });
+  require('./wallet-receipts').registerWalletReceipts({app,prisma,config,auth,limit});
+  app.get('/api/v1/services/onsite',auth,(_req,res)=>res.set('Cache-Control','no-store').json(require('./onsite-services').catalog(config)));
+  app.post('/api/v1/services/onsite/:service/estimate',auth,role('CUSTOMER'),limit('onsite-estimate',60,60),async(req,res)=>res.json(require('./onsite-services').estimate(req.params.service,require('./onsite-services').estimateSchema.parse(req.body),config)));
+  app.post('/api/v1/requests/:id/payment/cash',auth,role('CUSTOMER'),async(req,res)=>{z.object({confirmed:z.literal(true)}).strict().parse(req.body);res.json(require('./gateway-payments').safePayment(await cashPayments.report(req.params.id,req.user.id),config.ZARINPAL_MODE));});
+  app.post('/api/v1/requests/:id/payment/cash/confirm',auth,role('DRIVER'),async(req,res)=>{z.object({confirmed:z.literal(true)}).strict().parse(req.body);res.json(require('./gateway-payments').safePayment(await cashPayments.confirm(req.params.id,req.user.id),config.ZARINPAL_MODE));});
   app.post('/api/v1/requests/towing/estimate', auth, role('CUSTOMER'), limit('estimate', 40, 60), async (req, res) => res.json(await s.estimateTowing(d.towing.parse(req.body))));
   app.post('/api/v1/requests/:id/parts-quote', auth, role('DRIVER'), async (req, res) => {
     const { amountToman } = z.object({ amountToman: z.number().int().min(0).max(1000000000) }).strict().parse(req.body);
@@ -162,7 +152,7 @@ function createApp({ prisma, redis, config, io, services: s, otpSms }) {
       await lockRequest(tx, req.params.id);
       const request = await tx.assistanceRequest.findUnique({ where: { id: req.params.id } });
       if (!request || request.driverId !== req.user.id) throw new d.HttpError(404, 'Request not found');
-      if (request.service !== 'REPAIR' || !['ARRIVED', 'COMPLETED'].includes(request.status)) throw new d.HttpError(409, 'Parts quote requires inspection');
+      if (!['REPAIR','PERIODIC_SERVICE'].includes(request.service) || !['ARRIVED', 'COMPLETED'].includes(request.status)) throw new d.HttpError(409, 'Parts quote requires inspection');
       if (await tx.payment.findUnique({ where: { requestId: request.id } })) throw new d.HttpError(409, 'Payment amount is already locked');
       const result = await tx.assistanceRequest.update({ where: { id: request.id }, data: { partsQuoteToman: amountToman, partsQuoteVersion: { increment: 1 }, partsApprovedToman: null, partsApprovedAt: null } });
       await tx.outbox.create({ data: { requestId: request.id } });
@@ -194,7 +184,7 @@ function createApp({ prisma, redis, config, io, services: s, otpSms }) {
     const [entries, total] = await Promise.all([prisma.driverEarning.findMany({ where: { driverId: req.user.id }, orderBy: { createdAt: 'desc' }, take: 50 }), prisma.driverEarning.aggregate({ where: { driverId: req.user.id }, _sum: { amountToman: true } })]);
     res.json({ entries, totalToman: total._sum.amountToman || 0 });
   });
-  for (const [slug, service, schema] of [['towing', 'TOWING', d.towing], ['repair', 'REPAIR', d.repair]]) {
+  for (const [slug, service, schema] of [['towing', 'TOWING', d.towing], ['repair', 'REPAIR', d.repair],['carwash','MOBILE_CARWASH',require('./onsite-services').schema],['maintenance','PERIODIC_SERVICE',require('./onsite-services').schema],['inspection','INSPECTION',require('./onsite-services').schema]]) {
     app.post(`/api/v1/requests/${slug}`, auth, role('CUSTOMER'), limit('create-request', 20, 3600), async (req, res) => {
       res.status(201).json(await s.createRequest(req.user, schema.parse(req.body), service));
     });
@@ -205,7 +195,7 @@ function createApp({ prisma, redis, config, io, services: s, otpSms }) {
       await lockRequest(tx, req.params.id);
       const request = await tx.assistanceRequest.findUnique({ where: { id: req.params.id } });
       if (!request || request.driverId !== req.user.id) throw new d.HttpError(404, 'Request not found');
-      if (request.service !== 'REPAIR' || request.status !== 'ARRIVED' || !request.operationsStartedAt || request.partsApprovedToman == null) throw new d.HttpError(409, 'Operations must start before commission confirmation');
+      if (!['REPAIR','PERIODIC_SERVICE'].includes(request.service) || request.status !== 'ARRIVED' || !request.operationsStartedAt || request.partsApprovedToman == null) throw new d.HttpError(409, 'Operations must start before commission confirmation');
       if (request.driverCommissionConfirmedAt) return request;
       const result = await tx.assistanceRequest.update({ where: { id: request.id }, data: { driverCommissionConfirmedAt: new Date() } });
       await tx.outbox.create({ data: { requestId: request.id } });
@@ -217,7 +207,7 @@ function createApp({ prisma, redis, config, io, services: s, otpSms }) {
       await lockRequest(tx, req.params.id);
       const request = await tx.assistanceRequest.findUnique({ where: { id: req.params.id } });
       if (!request || request.driverId !== req.user.id) throw new d.HttpError(404, 'Request not found');
-      if (request.service !== 'REPAIR' || request.status !== 'ARRIVED' || request.partsApprovedToman == null) throw new d.HttpError(409, 'Approved parts quote required before operations');
+      if (!['REPAIR','PERIODIC_SERVICE'].includes(request.service) || request.status !== 'ARRIVED' || request.partsApprovedToman == null) throw new d.HttpError(409, 'Approved parts quote required before operations');
       if (request.operationsStartedAt) return request;
       const result = await tx.assistanceRequest.update({ where: { id: request.id }, data: { operationsStartedAt: new Date() } });
       await tx.outbox.create({ data: { requestId: request.id } });
@@ -226,12 +216,13 @@ function createApp({ prisma, redis, config, io, services: s, otpSms }) {
   });
   app.get('/api/v1/requests', auth, async (req, res) => {
     const { page } = z.object({ page: z.coerce.number().int().positive().max(10000).default(1) }).parse(req.query);
-    const rows = await prisma.assistanceRequest.findMany({ where: req.user.role === 'CUSTOMER' ? { customerId: req.user.id } : { driverId: req.user.id }, orderBy: { createdAt: 'desc' }, take: 50, skip: (page - 1) * 50, include: { payment: { select: { status: true } } } });
+    const rows = await prisma.assistanceRequest.findMany({ where: req.user.role === 'CUSTOMER' ? { customerId: req.user.id } : { driverId: req.user.id }, orderBy: { createdAt: 'desc' }, take: 50, skip: (page - 1) * 50, include: { customer: { select: { fullName: true } }, driver: { select: { fullName: true } }, payment: { select: { status: true, amountToman: true, driverShareToman: true, method:true, cashReportedAt:true, checkouts: { where: { mode: 'live', status: 'VERIFIED' }, select: { id: true }, take: 1 } } } } });
     const now = new Date();
     res.json(rows.map(row => isPendingRequestExpired(row, now) ? { ...row, status: 'EXPIRED' } : row));
   });
   app.get('/api/v1/drivers/requests/available', auth, role('DRIVER'), async (req, res) => {
-    const requests = await prisma.assistanceRequest.findMany({ where: { status: 'PENDING', driverId: null, createdAt: { gt: pendingRequestCutoff() }, service: { in: req.user.services } }, select: { id: true, service: true, vehicleName: true, originLat: true, originLng: true, originAddress: true, destinationAddress: true, destinationLat: true, destinationLng: true, distanceMeters: true, priceToman: true, pricingBreakdown: true, createdAt: true }, orderBy: { createdAt: 'desc' }, take: 50 });
+    if(await require('./driver-balance').driverBalance(prisma,req.user.id)<0)return res.json([]);
+    const requests = await prisma.assistanceRequest.findMany({ where: { status: 'PENDING', driverId: null, operatorConfirmedAt: null, createdAt: { gt: pendingRequestCutoff() }, service: { in: req.user.services } }, select: { customer: { select: { fullName: true } }, id: true, service: true, vehicleName: true, originLat: true, originLng: true, originAddress: true, destinationAddress: true, destinationLat: true, destinationLng: true, distanceMeters: true, priceToman: true, pricingBreakdown: true, createdAt: true }, orderBy: { createdAt: 'desc' }, take: 50 });
     res.json(requests);
   });
   app.get('/api/v1/requests/:id', auth, async (req, res) => res.json(await s.ownedRequest(req.params.id, req.user)));
@@ -244,15 +235,18 @@ function createApp({ prisma, redis, config, io, services: s, otpSms }) {
     const request = await prisma.$transaction(async tx => {
       // Serialize acceptance per driver; conditional update prevents two drivers accepting one request.
       await tx.$queryRaw`SELECT id FROM "User" WHERE id=${req.user.id} FOR UPDATE`;
+      await require('./driver-balance').assertDriverCredit(tx,req.user.id);
       const loc = await tx.driverLocation.findUnique({ where: { driverId: req.user.id } });
       if (!loc || Date.now() - loc.recordedAt.getTime() > config.LOCATION_MAX_AGE_SECONDS * 1000) throw new d.HttpError(409, 'Send a fresh GPS location before accepting');
       const active = await tx.assistanceRequest.count({ where: { driverId: req.user.id, status: { in: ['ACCEPTED', 'ARRIVED'] } } });
       if (active) throw new d.HttpError(409, 'Driver already has an active request');
       const now = new Date();
-      const updated = await tx.assistanceRequest.updateMany({ where: { id: req.params.id, status: 'PENDING', driverId: null, createdAt: { gt: pendingRequestCutoff(now) }, service: { in: req.user.services } }, data: { driverId: req.user.id, status: 'ACCEPTED', acceptedAt: now } });
+      const updated = await tx.assistanceRequest.updateMany({ where: { id: req.params.id, status: 'PENDING', driverId: null, operatorConfirmedAt: null, createdAt: { gt: pendingRequestCutoff(now) }, service: { in: req.user.services } }, data: { driverId: req.user.id, status: 'ACCEPTED', acceptedAt: now } });
       if (!updated.count) throw new d.HttpError(409, 'Request unavailable or unsupported service');
       await tx.outbox.create({ data: { requestId: req.params.id } });
-      return tx.assistanceRequest.findUnique({ where: { id: req.params.id } });
+      const assigned = await tx.assistanceRequest.findUnique({ where: { id: req.params.id } });
+      await require('./operator/locations').captureRequestLocations(tx, assigned, {id:req.user.id,role:'SYSTEM',name:'پذیرش امدادگر'}, 'DRIVER_ACCEPTED', config.LOCATION_MAX_AGE_SECONDS || 120);
+      return assigned;
     });
     res.json(request);
   });
@@ -263,7 +257,11 @@ function createApp({ prisma, redis, config, io, services: s, otpSms }) {
     if (!allowed) throw new d.HttpError(409, 'Invalid status transition');
     await prisma.$transaction(async tx => {
       await lockRequest(tx, request.id);
-      if (status === 'COMPLETED' && request.service === 'REPAIR') {
+      if (status === 'COMPLETED') {
+        const payment = await tx.payment.findUnique({ where: { requestId: request.id } });
+        if (!payment || !['VERIFIED', ...(config.ZARINPAL_MODE === 'live' ? [] : ['SANDBOX_VERIFIED'])].includes(payment.status)) throw new d.HttpError(409, 'Payment must be verified before completion');
+      }
+      if (status === 'COMPLETED' && ['REPAIR','PERIODIC_SERVICE'].includes(request.service)) {
         const fresh = await tx.assistanceRequest.findUnique({ where: { id: request.id }, include: { payment: true } });
         if (!fresh.operationsStartedAt || fresh.partsApprovedToman == null || !fresh.driverCommissionConfirmedAt) throw new d.HttpError(409, 'Operations and driver commission confirmation required before completion');
       }

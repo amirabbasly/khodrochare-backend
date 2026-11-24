@@ -2,7 +2,7 @@ const { z } = require('zod');
 const { randomBytes } = require('node:crypto');
 const d = require('./domain');
 
-function registerMonitoring({ app, prisma, redis, config, auth, limit, geocoder, io }) {
+function registerMonitoring({ app, prisma, redis, config, auth, limit, geocoder, io, sms }) {
   app.post('/api/v1/admin/session', limit('admin-login', 5, 900), async (req, res) => {
     const input = z.object({ username: z.string().max(100), password: z.string().min(1).max(128) }).strict().parse(req.body);
     if (!config.ADMIN_PASSWORD_HASH) throw new d.HttpError(503, 'Admin login is not configured');
@@ -24,7 +24,7 @@ function registerMonitoring({ app, prisma, redis, config, auth, limit, geocoder,
   app.get('/api/v1/admin/overview', admin, async (req, res) => res.json(await overview(prisma, config.LOCATION_MAX_AGE_SECONDS)));
   require('./market/routes').registerMarket({app,prisma,redis,config,auth,admin,limit});
   require('./customer-care').registerCustomerCare({app,prisma,auth,admin,limit});
-  require('./hall/routes').registerHall({app,prisma,redis,config,auth,admin,limit,io});
+  require('./hall/routes').registerHall({app,prisma,redis,config,auth,admin,limit,io,sms});
   app.patch('/api/v1/me', auth, async (req, res) => {
     const input = z.object({ fullName: z.string().trim().min(3).max(150) }).strict().parse(req.body);
     const updated = await prisma.user.update({ where: { id: req.user.id }, data: input, include: { vehicles: true } });

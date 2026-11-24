@@ -39,8 +39,8 @@ test('unavailable road routing fails explicitly instead of charging straight-lin
 
 test('request creation persists the repair entry fee, exclusions and a durable event together', async () => {
   let saved;
-  let outbox = false;
-  const tx = { assistanceRequest: { create: async ({ data }) => { saved = data; return { id: 'request', ...data }; } }, $executeRaw: async () => 1, outbox: { create: async () => { outbox = true; } } };
+  let outbox = false; let captured;
+  const tx = { userLocation:{findUnique:async()=>null}, operatorAudit:{create:async({data})=>{captured=data;return data;}}, assistanceRequest: { create: async ({ data }) => { saved = data; return { id: 'request', ...data }; } }, $executeRaw: async () => 1, outbox: { create: async () => { outbox = true; } } };
   const prisma = { $transaction: async callback => callback(tx) };
   const services = createServices({ prisma });
   await services.createRequest({ id: 'customer' }, { vehicleName: 'هر خودرو', vehiclePlate: '12ب34567', origin: { latitude: 35, longitude: 51 }, problem: 'روشن نمیشود' }, 'REPAIR');
@@ -49,4 +49,7 @@ test('request creation persists the repair entry fee, exclusions and a durable e
   assert.equal(saved.pricingVersion, 'reference-table-v1');
   assert.ok(saved.createdAt instanceof Date);
   assert.equal(outbox, true);
+  assert.equal(captured.details.reason,'REQUEST_CREATED');
+  assert.equal(captured.details.locations.origin.latitude,35);
+  assert.equal(captured.details.locations.customer,null);
 });

@@ -11,10 +11,11 @@ const OTP_SECONDS = 300, RESEND_SECONDS = 60, MAX_ATTEMPTS = 5;
 const invalidCode = () => new d.HttpError(400, 'کد تأیید نادرست است یا مهلت آن تمام شده؛ کد جدید دریافت کنید.');
 const otpHash = (secret, id, phone, purpose, code) => createHmac('sha256', secret).update(JSON.stringify([id, phone, purpose, code])).digest('hex');
 
-function createCustomerAuth({ prisma, config, services, sms = createNiazpardaz(config), now = () => new Date(), generateCode = () => String(randomInt(100000, 1000000)) }) {
+function createCustomerAuth({ prisma, config, services, sms = createNiazpardaz(config), now = () => new Date(), accountRole = 'CUSTOMER', registerDriver, generateCode = () => String(randomInt(100000, 1000000)) }) {
   const secret = config.OTP_HMAC_SECRET || config.NIAZPARDAZ_API_KEY;
-  async function requestCode({ phone, purpose }) {
+  async function requestCode({ phone, purpose, context }) {
     if (!sms.enabled || !secret) throw new d.HttpError(503, 'ارسال کد تأیید هنوز در سرور تنظیم نشده است.');
+    purpose = accountRole === 'DRIVER' ? 'DRIVER_' + purpose : purpose;
     const at = now(), id = randomUUID(), code = generateCode();
     const expiresAt = new Date(at.getTime() + OTP_SECONDS * 1000);
     await prisma.$transaction(async tx => {
@@ -27,7 +28,7 @@ function createCustomerAuth({ prisma, config, services, sms = createNiazpardaz(c
       ]);
       if (hour >= 5 || day >= 10) throw new d.HttpError(429, 'تعداد درخواست‌های کد برای این شماره بیش از حد مجاز است؛ بعداً تلاش کنید.');
       await tx.customerOtpChallenge.updateMany({ where: { phone, status: { in: ['SENDING', 'SENT'] } }, data: { status: 'INVALIDATED' } });
-      await tx.customerOtpChallenge.create({ data: { id, phone, purpose, codeHash: otpHash(secret, id, phone, purpose, code), expiresAt, createdAt: at } });
+      await tx.customerOtpChallenge.create({ data: { id, phone, purpose, ...(context ? { context } : {}), codeHash: otpHash(secret, id, phone, purpose, code), expiresAt, createdAt: at } });
     });
     try {
       await sms.sendCode(phone, code);
@@ -43,6 +44,7 @@ function createCustomerAuth({ prisma, config, services, sms = createNiazpardaz(c
   async function requestDeletion(userId) {
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user || user.role !== 'CUSTOMER' || user.deletedAt) throw new d.HttpError(401, 'Authentication required');
+    await require('./payment-reconciliation').reconcileCustomerPayments(prisma, config, userId);
     await assertDeletable(prisma, userId);
     return requestCode({ phone: user.phone, purpose: 'DELETE_ACCOUNT' });
   }
@@ -51,7 +53,8 @@ function createCustomerAuth({ prisma, config, services, sms = createNiazpardaz(c
     const outcome = await prisma.$transaction(async tx => {
       await tx.$queryRaw`SELECT id FROM "CustomerOtpChallenge" WHERE id=${input.challengeId} FOR UPDATE`;
       const challenge = await tx.customerOtpChallenge.findUnique({ where: { id: input.challengeId } });
-      if (!secret || !challenge || challenge.status !== 'SENT' || challenge.expiresAt <= now() || challenge.attempts >= MAX_ATTEMPTS || (deletionUserId ? challenge.purpose !== 'DELETE_ACCOUNT' : reset ? challenge.purpose !== 'RESET_PASSWORD' : !['REGISTER', 'LOGIN'].includes(challenge.purpose))) return { error: invalidCode() };
+      if (input.contact && (accountRole !== 'CUSTOMER' || challenge?.purpose !== 'HALL_CONTACT' || challenge.context !== `hall:${input.contact.userId}:${input.contact.listingId}`)) return { error: invalidCode() };
+      if (!secret || !challenge || challenge.status !== 'SENT' || challenge.expiresAt <= now() || challenge.attempts >= MAX_ATTEMPTS || (accountRole === 'DRIVER' ? !['DRIVER_REGISTER', 'DRIVER_LOGIN', 'DRIVER_RESET_PASSWORD'].includes(challenge.purpose) || (reset ? challenge.purpose !== 'DRIVER_RESET_PASSWORD' : input.registration ? challenge.purpose !== 'DRIVER_REGISTER' : challenge.purpose !== 'DRIVER_LOGIN') : input.contact ? challenge.purpose !== 'HALL_CONTACT' : deletionUserId ? challenge.purpose !== 'DELETE_ACCOUNT' : reset ? challenge.purpose !== 'RESET_PASSWORD' : !['REGISTER', 'LOGIN'].includes(challenge.purpose))) return { error: invalidCode() };
       let deletingUser;
       if (deletionUserId) {
         await tx.$queryRaw`SELECT id FROM "User" WHERE id=${deletionUserId} FOR UPDATE`;
@@ -66,17 +69,29 @@ function createCustomerAuth({ prisma, config, services, sms = createNiazpardaz(c
         return { error: invalidCode() }; // Commit failed-attempt counters before throwing.
       }
       await tx.customerOtpChallenge.update({ where: { id: challenge.id }, data: { status: 'USED', consumedAt: now() } });
+      if (input.contact) {
+        await tx.$queryRaw`SELECT id FROM "HallListing" WHERE id=${input.contact.listingId} FOR UPDATE`;
+        const updated = await tx.hallListing.updateMany({ where: { id: input.contact.listingId, ownerId: input.contact.userId, status: { not: 'DELETED' } }, data: { verifiedContactPhone: challenge.phone } });
+        if (!updated.count) throw new d.HttpError(404, 'آگهی پیدا نشد.');
+        return { verifiedPhone: challenge.phone };
+      }
       if (deletingUser) return eraseCustomer(tx, deletingUser, now());
-      let user = await tx.user.findUnique({ where: { role_phone: { role: 'CUSTOMER', phone: challenge.phone } } });
+      let user = await tx.user.findUnique({ where: { role_phone: { role: accountRole, phone: challenge.phone } } });
+      if (accountRole === 'DRIVER' && input.registration) {
+        if (input.registration.phone !== challenge.phone || user) throw new d.HttpError(409, 'شماره همراه قبلاً ثبت شده یا با شماره تأییدشده یکسان نیست.');
+        user = await registerDriver(tx, input.registration);
+        return { session: await services.session(user, tx) };
+      }
+      if (user?.deletedAt || user?.isActive === false) return { error: invalidCode() };
       if (reset) {
-        if (!user) return { error: new d.HttpError(400, 'برای این شماره حساب مشتری وجود ندارد؛ ابتدا ثبت‌نام کنید.') };
+        if (!user) return { error: new d.HttpError(400, 'برای این شماره حسابی وجود ندارد؛ ابتدا ثبت‌نام کنید.') };
         const passwordHash = await d.hashPassword(input.password);
         await tx.user.update({ where: { id: user.id }, data: { passwordHash, phoneVerifiedAt: now() } });
         await tx.session.deleteMany({ where: { userId: user.id } });
         return { resetUserId: user.id };
       }
-      if (!user && challenge.purpose === 'LOGIN') return { error: new d.HttpError(400, 'این شماره هنوز ثبت‌نام نکرده است؛ از بخش ثبت‌نام اقدام کنید.') };
-      if (!user) user = await tx.user.upsert({ where: { role_phone: { role: 'CUSTOMER', phone: challenge.phone } }, create: { role: 'CUSTOMER', phone: challenge.phone, fullName: 'کاربر خودرو چاره', nationalId: null, passwordHash: null, services: [], phoneVerifiedAt: now() }, update: { phoneVerifiedAt: now() } });
+      if (!user && (accountRole === 'DRIVER' || challenge.purpose === 'LOGIN')) return { error: new d.HttpError(400, 'این شماره هنوز ثبت‌نام نکرده است؛ از بخش ثبت‌نام اقدام کنید.') };
+      if (!user) user = await tx.user.upsert({ where: { role_phone: { role: accountRole, phone: challenge.phone } }, create: { role: accountRole, phone: challenge.phone, fullName: 'کاربر خودرو چاره', nationalId: null, passwordHash: null, services: [], phoneVerifiedAt: now() }, update: { phoneVerifiedAt: now() } });
       else user = await tx.user.update({ where: { id: user.id }, data: { phoneVerifiedAt: now() } });
       return { session: await services.session(user, tx) };
     }, deletionUserId ? { isolationLevel: 'Serializable' } : undefined).catch(error => {

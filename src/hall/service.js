@@ -5,8 +5,8 @@ const {publicationDetails,details,indexFields,analyzePrices,expressEligible,defa
 const include={photos:{orderBy:{position:'asc'}},orders:{where:{status:'VERIFIED',activatedAt:{not:null}},orderBy:{verifiedAt:'desc'}}};
 const lock=async(tx,id)=>tx.$queryRaw`SELECT id FROM "HallListing" WHERE id=${id} FOR UPDATE`;
 function listingDto(row,owned=false){
-  const{ownerId,owner,draft,photos,orders,...rest}=row;
-  return{...rest,seller:owner?{fullName:owner.fullName}:undefined,priceToman:row.priceToman==null?null:Number(row.priceToman),details:owned?draft:undefined,contactPhone:row.status==='PUBLISHED'||owned?draft.contactPhone:undefined,
+  const{ownerId,owner,draft,photos,orders,verifiedContactPhone,reviewedBy,moderationNote,...rest}=row;
+  return{...rest,...(owned?{verifiedContactPhone,reviewedBy,moderationNote}:{}),seller:owner?{fullName:owner.fullName}:undefined,priceToman:row.priceToman==null?null:Number(row.priceToman),details:owned?draft:undefined,contactPhone:row.status==='PUBLISHED'||owned?draft.contactPhone:undefined,
     fuelType:draft.fuelType,gearboxType:draft.gearboxType,chassisCondition:draft.chassisCondition,gearboxCondition:draft.gearboxCondition,location:owned?draft.location:publicLocation(draft.location),
     description:row.status==='PUBLISHED'||owned?draft.description:undefined,color:draft.color,
     photos:(photos||[]).map(p=>({id:p.id,url:`/hall/photos/${p.id}`+(owned?`?token=${p.readToken}`:'')})),
@@ -30,7 +30,7 @@ function createHall(prisma,config,provider=createZarinpal({...config,ZARINPAL_MO
   async function ready(){if(!boot)boot=initialize().catch(e=>{boot=null;throw e;});return boot;}
   async function owned(id,userId,tx=prisma){const row=await tx.hallListing.findFirst({where:{id,ownerId:userId},include});if(!row)throw new HttpError(404,'آگهی پیدا نشد.');return row;}
   async function editable(tx,row){
-    if(!['DRAFT','PUBLISHED'].includes(row.status))throw new HttpError(409,'این آگهی قابل ویرایش نیست.');
+    if(!['DRAFT','PUBLISHED','PENDING_REVIEW','REJECTED'].includes(row.status))throw new HttpError(409,'این آگهی قابل ویرایش نیست.');
     await tx.hallOrder.updateMany({where:{listingId:row.id,status:'CREATING',createdAt:{lt:new Date(Date.now()-120000)}},data:{status:'FAILED',errorCode:'REQUEST_EXPIRED'}});
     const pending=await tx.hallOrder.findFirst({where:{listingId:row.id,status:{in:['CREATING','PENDING']}}});
     if(pending)throw new HttpError(409,'ابتدا پرداخت در جریان را تکمیل یا از بخش پرداخت لغو کنید.');
@@ -43,23 +43,32 @@ function createHall(prisma,config,provider=createZarinpal({...config,ZARINPAL_MO
   });}
   async function save(id,userId,data,version){return prisma.$transaction(async tx=>{
     await lock(tx,id);const row=await owned(id,userId,tx);await editable(tx,row);
+    if(row.status==='PUBLISHED')await assertContact(tx,row,data);
     if(row.status==='PUBLISHED')details.required({priceToman:true}).parse(data);
     if(row.version!==version)throw new HttpError(409,'پیش‌نویس در جای دیگری تغییر کرده است؛ دوباره آن را باز کنید.');
-    return listingDto(await tx.hallListing.update({where:{id},data:{draft:data,...indexFields(data),...(row.status==='PUBLISHED'?{inspectionStatus:'NOT_INSPECTED',inspectionNote:null}:{}),version:{increment:1}},include}),true);
+    return listingDto(await tx.hallListing.update({where:{id},data:{draft:data,...indexFields(data),...(row.status==='PUBLISHED'?{status:'PENDING_REVIEW',submittedAt:new Date(),reviewedAt:null,reviewedBy:null,moderationNote:null,inspectionStatus:'NOT_INSPECTED',inspectionNote:null}:{}),version:{increment:1}},include}),true);
   });}
+  async function photosChanged(tx,row){
+    await tx.hallListing.update({where:{id:row.id},data:{version:{increment:1},...(['PUBLISHED','PENDING_REVIEW'].includes(row.status)?{status:'PENDING_REVIEW',submittedAt:new Date(),reviewedAt:null,reviewedBy:null,moderationNote:null,inspectionStatus:'NOT_INSPECTED',inspectionNote:null}:{})}});
+  }
   async function validatePublish(tx,row){
     const data=publicationDetails.parse(row.draft);
+    await assertContact(tx,row,data);
     const year=data.year<1800?Number(new Intl.DateTimeFormat('en-US-u-ca-persian',{year:'numeric'}).formatToParts(new Date()).find(p=>p.type==='year')?.value):new Date().getUTCFullYear();
     if(data.year>year+1)throw new HttpError(400,'سال تولید معتبر نیست.');
     if(!row.photos.length)throw new HttpError(400,'حداقل یک تصویر خودرو بارگذاری کنید.');
     return data;
   }
+  async function assertContact(tx,row,data){
+    const owner=await tx.user.findUnique({where:{id:row.ownerId},select:{phone:true}});
+    if(data.contactPhone!==owner?.phone&&data.contactPhone!==row.verifiedContactPhone)throw new HttpError(409,'ابتدا شماره تماس جایگزین آگهی را با کد تأیید کنید.');
+  }
   async function freePublish(id,userId){await ready();return prisma.$transaction(async tx=>{
     await lock(tx,id);const row=await owned(id,userId,tx);
-    if(row.status==='PUBLISHED')return listingDto(row,true);
+    if(['PUBLISHED','PENDING_REVIEW'].includes(row.status))return listingDto(row,true);
     await editable(tx,row);await validatePublish(tx,row);
     const plan=await tx.hallPlan.findUnique({where:{code:'FREE'}});if(!plan?.active||plan.priceToman!==0)throw new HttpError(409,'انتشار رایگان موقتاً در دسترس نیست.');
-    return listingDto(await tx.hallListing.update({where:{id},data:{status:'PUBLISHED',publishedAt:new Date(),bumpedAt:new Date()},include}),true);
+    return listingDto(await tx.hallListing.update({where:{id},data:{status:'PENDING_REVIEW',submittedAt:new Date(),reviewedAt:null,reviewedBy:null,moderationNote:null,version:{increment:1}},include}),true);
   });}
   async function estimate(data,userId){
     const current=data.year<1800?Number(new Intl.DateTimeFormat('en-US-u-ca-persian',{year:'numeric'}).formatToParts(new Date()).find(p=>p.type==='year')?.value):new Date().getUTCFullYear();
@@ -75,7 +84,7 @@ function createHall(prisma,config,provider=createZarinpal({...config,ZARINPAL_MO
       const existing=await tx.hallOrder.findUnique({where:{userId_idempotencyKey:{userId:user.id,idempotencyKey:input.idempotencyKey}}});
       if(existing){if(existing.listingId!==id||existing.planCode!==input.planCode)throw new HttpError(409,'شناسه پرداخت تکراری است.');return existing;}
       const action=row.status==='PUBLISHED'?'UPGRADE':'PUBLISH';
-      if(!['DRAFT','PUBLISHED'].includes(row.status))throw new HttpError(409,'آگهی در وضعیت قابل انتشار نیست.');
+      if(!['DRAFT','PUBLISHED','PENDING_REVIEW','REJECTED'].includes(row.status))throw new HttpError(409,'آگهی در وضعیت قابل انتشار نیست.');
       await validatePublish(tx,row);
       const plan=await tx.hallPlan.findUnique({where:{code:input.planCode}});
       if(!plan?.active||plan.priceToman<=0||plan.kind!==(action==='PUBLISH'?'PLAN':'BOOST'))throw new HttpError(400,'طرح انتخاب‌شده معتبر نیست.');
@@ -103,7 +112,11 @@ function createHall(prisma,config,provider=createZarinpal({...config,ZARINPAL_MO
   }
   async function activate(tx,order,row){
     const boostField=order.planCode==='LADDER'?'ladderUntil':order.planCode==='URGENT'?'urgentUntil':order.planCode==='FEATURED'?'featuredUntil':null;
-    if(row.status==='BLOCKED'||row.version!==order.listingVersion||order.action==='PUBLISH'&&row.status!=='DRAFT'||order.action==='UPGRADE'&&(row.status!=='PUBLISHED'||boostField&&row[boostField]>new Date()))return tx.hallOrder.update({where:{id:order.id},data:{status:'REVIEW_REQUIRED',errorCode:'LISTING_CHANGED',verifiedAt:new Date()}});
+    if(['BLOCKED','REJECTED','DELETED','PENDING_REVIEW'].includes(row.status)||row.version!==order.listingVersion||order.action==='PUBLISH'&&row.status!=='DRAFT'||order.action==='UPGRADE'&&(row.status!=='PUBLISHED'||boostField&&row[boostField]>new Date()))return tx.hallOrder.update({where:{id:order.id},data:{status:'REVIEW_REQUIRED',errorCode:'LISTING_CHANGED',verifiedAt:new Date()}});
+    if(order.action==='PUBLISH'){
+      await tx.hallListing.update({where:{id:row.id},data:{status:'PENDING_REVIEW',submittedAt:new Date(),moderationNote:null}});
+      return tx.hallOrder.update({where:{id:order.id},data:{status:'REVIEW_REQUIRED',errorCode:'MODERATION_REQUIRED',verifiedAt:new Date()}});
+    }
     const now=new Date(),until=new Date(Date.now()+order.snapshot.durationHours*3600000);
     const data=order.action==='PUBLISH'?{status:'PUBLISHED',publishedAt:now,bumpedAt:now}:{};
     if(['EXPRESS48','FEATURED'].includes(order.planCode))data.featuredUntil=until;
@@ -127,6 +140,6 @@ function createHall(prisma,config,provider=createZarinpal({...config,ZARINPAL_MO
       return activate(tx,paid,row);
     });
   }
-  return{ready,owned,editable,remove,save,estimate,freePublish,checkout,verify,orderDto,listingDto};
+  return{ready,owned,editable,photosChanged,remove,save,estimate,freePublish,checkout,verify,orderDto,listingDto};
 }
 module.exports={createHall,listingDto,include,lock};

@@ -21,7 +21,7 @@ test('48-hour priority requires healthy condition, recent year and bounded milea
 function database(){
  const plans=new Map(),orders=[],row={id:randomUUID(),ownerId:'owner',version:2,status:'DRAFT',draft:{...full},priceToman:3500000000n,photos:[{id:randomUUID(),readToken:'secret',url:'',position:0}],orders:[]};let requests=0,verifications=0,activations=0;
  const match=(r,w)=>Object.entries(w).every(([k,v])=>k==='userId_idempotencyKey'?r.userId===v.userId&&r.idempotencyKey===v.idempotencyKey:v&&typeof v==='object'?'in'in v?v.in.includes(r[k]):'lt'in v?r[k]<v.lt:true:r[k]===v);
- const tx={$queryRaw:async()=>[],hallPlan:{upsert:async({where,create})=>{if(!plans.has(where.code))plans.set(where.code,create);},findUnique:async({where})=>plans.get(where.code),updateMany:async()=>({count:0})},hallBanner:{},hallListing:{findFirst:async({where})=>match(row,where)?{...row}:null,findUnique:async()=>({...row}),update:async({data})=>{if(data.status==='PUBLISHED')activations++;const{version,...rest}=data;Object.assign(row,rest);if(version)row.version+=version.increment;return{...row};}},hallOrder:{findUnique:async({where})=>orders.find(r=>match(r,where)),findFirst:async({where})=>orders.find(r=>match(r,where)),create:async({data})=>{const r={id:randomUUID(),status:'CREATING',errorCode:null,createdAt:new Date(),...data};orders.push(r);return{...r};},update:async({where,data})=>Object.assign(orders.find(r=>match(r,where)),data),updateMany:async({where,data})=>{const found=orders.filter(r=>match(r,where));found.forEach(r=>Object.assign(r,data));return{count:found.length};}}};
+ const tx={$queryRaw:async()=>[],user:{findUnique:async()=>({phone:full.contactPhone})},hallPlan:{upsert:async({where,create})=>{if(!plans.has(where.code))plans.set(where.code,create);},findUnique:async({where})=>plans.get(where.code),updateMany:async()=>({count:0})},hallBanner:{},hallListing:{findFirst:async({where})=>match(row,where)?{...row}:null,findUnique:async()=>({...row}),update:async({data})=>{if(data.status==='PUBLISHED')activations++;const{version,...rest}=data;Object.assign(row,rest);if(version)row.version+=version.increment;return{...row};}},hallOrder:{findUnique:async({where})=>orders.find(r=>match(r,where)),findFirst:async({where})=>orders.find(r=>match(r,where)),create:async({data})=>{const r={id:randomUUID(),status:'CREATING',errorCode:null,createdAt:new Date(),...data};orders.push(r);return{...r};},update:async({where,data})=>Object.assign(orders.find(r=>match(r,where)),data),updateMany:async({where,data})=>{const found=orders.filter(r=>match(r,where));found.forEach(r=>Object.assign(r,data));return{count:found.length};}}};
  const provider={mode:'sandbox',request:async()=>{requests++;return{authority:'S'+'1'.repeat(35)};},verify:async()=>{verifications++;return{refId:'123456'};},redirect:()=> 'https://sandbox.zarinpal.com/pg/StartPay/test'};
  const prisma={...tx,$transaction:fn=>fn(tx)},service=createHall(prisma,{},provider);
  return{service,row,orders,plans,provider,counts:()=>({requests,verifications,activations})};
@@ -29,15 +29,15 @@ function database(){
 test('free Hall publication requires ownership, complete data and a photo, without any payment',async()=>{
  const db=database();await assert.rejects(db.service.freePublish(db.row.id,'stranger'),{status:404});
  const photos=db.row.photos;db.row.photos=[];await assert.rejects(db.service.freePublish(db.row.id,'owner'),{status:400});db.row.photos=photos;
- const published=await db.service.freePublish(db.row.id,'owner');assert.equal(published.status,'PUBLISHED');await db.service.freePublish(db.row.id,'owner');assert.equal(db.counts().activations,1);assert.equal(db.counts().requests,0);assert.equal(db.row.draft.contactPhone,full.contactPhone);
+ const published=await db.service.freePublish(db.row.id,'owner');assert.equal(published.status,'PENDING_REVIEW');await db.service.freePublish(db.row.id,'owner');assert.equal(db.counts().activations,0);assert.equal(db.counts().requests,0);assert.equal(db.row.draft.contactPhone,full.contactPhone);
 });
 test('paid Hall publication uses server fee, stays private until verified and activates once on repeated callbacks',async()=>{
  const db=database(),key=randomUUID();
  const order=await db.service.checkout({id:'owner',phone:'09121234567'},db.row.id,{planCode:'MANAGED',idempotencyKey:key});
  assert.equal(order.amountToman,defaultPlans[0].priceToman);assert.equal(db.row.status,'DRAFT');assert.equal(order.mode,'sandbox');await assert.rejects(db.service.save(db.row.id,'owner',full,db.row.version),{status:409});
  await db.service.checkout({id:'owner'},db.row.id,{planCode:'MANAGED',idempotencyKey:key});assert.equal(db.counts().requests,1);
- const paid=await db.service.verify(order.id,db.orders[0].authority,'OK');assert.equal(paid.status,'VERIFIED');assert.equal(db.row.status,'PUBLISHED');
- await db.service.verify(order.id,db.orders[0].authority,'OK');assert.equal(db.counts().activations,1);assert.equal(db.counts().verifications,1);
+ const paid=await db.service.verify(order.id,db.orders[0].authority,'OK');assert.equal(paid.status,'REVIEW_REQUIRED');assert.equal(db.row.status,'PENDING_REVIEW');
+ await db.service.verify(order.id,db.orders[0].authority,'OK');assert.equal(db.counts().activations,0);assert.equal(db.counts().verifications,1);
 });
 test('failed and cancelled payments retain drafts; a changed listing after late verification needs review',async()=>{
  const db=database(),user={id:'owner'};const first=await db.service.checkout(user,db.row.id,{planCode:'MANAGED',idempotencyKey:randomUUID()});
@@ -48,12 +48,12 @@ test('failed and cancelled payments retain drafts; a changed listing after late 
 test('upgrades cannot activate before verification and publication rejects forged or ineligible plans',async()=>{
  const db=database();await assert.rejects(db.service.checkout({id:'owner'},db.row.id,{planCode:'LADDER',idempotencyKey:randomUUID()}),{status:400});
  db.row.draft.bodyCondition='تصادفی';await assert.rejects(db.service.checkout({id:'owner'},db.row.id,{planCode:'EXPRESS48',idempotencyKey:randomUUID()}),{status:400});db.row.draft.bodyCondition='سالم';
- await db.service.freePublish(db.row.id,'owner');const order=await db.service.checkout({id:'owner'},db.row.id,{planCode:'LADDER',idempotencyKey:randomUUID()});assert.equal(db.row.ladderUntil,undefined);
+ await db.service.freePublish(db.row.id,'owner');db.row.status='PUBLISHED';const order=await db.service.checkout({id:'owner'},db.row.id,{planCode:'LADDER',idempotencyKey:randomUUID()});assert.equal(db.row.ladderUntil,undefined);
  await db.service.verify(order.id,db.orders[0].authority,'OK');assert.ok(db.row.ladderUntil>new Date());
 });
 
 test('a successful late boost payment on a sold car is held for review instead of consuming the service',async()=>{
- const db=database();await db.service.freePublish(db.row.id,'owner');
+ const db=database();await db.service.freePublish(db.row.id,'owner');db.row.status='PUBLISHED';
  const order=await db.service.checkout({id:'owner'},db.row.id,{planCode:'FEATURED',idempotencyKey:randomUUID()});db.row.status='SOLD';
  const result=await db.service.verify(order.id,db.orders[0].authority,'OK');assert.equal(result.status,'REVIEW_REQUIRED');assert.equal(db.row.featuredUntil,undefined);
 });
@@ -79,11 +79,11 @@ test('every Hall admin mutation and private owner route authenticates before rea
  }finally{await new Promise(r=>server.close(r));}
 });
 
-test('published owner edits preserve publication, reject stale versions and clear the inspection approval',async()=>{
- const db=database();await db.service.freePublish(db.row.id,'owner');db.row.inspectionStatus='VERIFIED';db.row.inspectionNote='old';
+test('published owner edits enter review, reject stale versions and clear the inspection approval',async()=>{
+ const db=database();await db.service.freePublish(db.row.id,'owner');db.row.status='PUBLISHED';db.row.inspectionStatus='VERIFIED';db.row.inspectionNote='old';
  await assert.rejects(db.service.save(db.row.id,'stranger',full,db.row.version),{status:404});
  await assert.rejects(db.service.save(db.row.id,'owner',{},db.row.version));
  const edited=await db.service.save(db.row.id,'owner',{...full,priceToman:4000000000},db.row.version);
- assert.equal(edited.status,'PUBLISHED');assert.equal(edited.priceToman,4000000000);assert.equal(edited.inspectionStatus,'NOT_INSPECTED');assert.equal(edited.inspectionNote,null);
+ assert.equal(edited.status,'PENDING_REVIEW');assert.equal(edited.priceToman,4000000000);assert.equal(edited.inspectionStatus,'NOT_INSPECTED');assert.equal(edited.inspectionNote,null);
  await assert.rejects(db.service.save(db.row.id,'owner',full,2),{status:409});
 });

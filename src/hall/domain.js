@@ -22,7 +22,7 @@ const publicationDetails=details.required({priceToman:true,fuelType:true,gearbox
 const planSchema=z.object({
   code:z.enum(['MANAGED','REPAIR_SELL','EXPRESS48','FREE','LADDER','URGENT','FEATURED']),
   name:text.min(2),kind:z.enum(['PLAN','BOOST']),description:z.string().min(5).max(1000),
-  priceToman:z.number().int().min(0).max(100000000),services:z.array(z.string().max(200)).max(15),
+  priceToman:z.number().int().min(0).max(100000000),originalPriceToman:z.number().int().min(0).max(100000000).nullable().optional(),services:z.array(z.string().max(200)).max(15),
   terms:z.string().min(5).max(2000),active:z.boolean(),durationHours:z.number().int().min(1).max(8760),sortOrder:z.number().int().min(0).max(100),
 }).strict().superRefine((p,ctx)=>{
   if((['LADDER','URGENT','FEATURED'].includes(p.code))!==(p.kind==='BOOST')||p.code==='FREE'&&(p.priceToman!==0||!p.active)||p.code!=='FREE'&&p.priceToman===0)ctx.addIssue({code:'custom',message:'نوع و تعرفه طرح معتبر نیست؛ طرح رایگان باید فعال و بدون هزینه بماند.'});
@@ -35,7 +35,7 @@ const defaultPlans=[
   {code:'REPAIR_SELL',name:'تعمیر و فروش',kind:'PLAN',description:'اول آماده فروش، بعد آماده یک معامله بهتر.',priceToman:2000000,services:['کارشناسی اولیه رایگان','هماهنگی حمل در صورت نیاز','تعمیر فقط با تأیید مالک','مدیریت فروش پس از آماده‌سازی'],terms:standardTerms,durationHours:168,sortOrder:1,active:true},
   {code:'EXPRESS48',name:'فروش ویژه ۴۸ ساعته',kind:'PLAN',description:'اولویت پیگیری برای خودروی سالم و واجد شرایط.',priceToman:2500000,services:['اولویت بررسی و پیگیری','نمایش ویژه تا ۴۸ ساعت','هماهنگی سریع بازدید'],terms:'هدف پیگیری سریع است و فروش در ۴۸ ساعت تضمین نمی‌شود. ویژه خودرو با بدنه و فنی سالم، کارکرد حداکثر ۱۵۰ هزار و حداکثر ۸ سال عمر. '+standardTerms,durationHours:48,sortOrder:2,active:true},
   {code:'FREE',name:'آگهی رایگان',kind:'PLAN',description:'خودتان بفروشید؛ بدون پرداخت هزینه انتشار.',priceToman:0,services:['انتشار مستقیم آگهی','دریافت درخواست خرید','دسترسی به آمار آگهی'],terms:'خرید خدمت پولی اجباری نیست. مسئولیت صحت اطلاعات آگهی با مالک است.',durationHours:168,sortOrder:3,active:true},
-  ...[['LADDER','نردبان',100000],['URGENT','فوری',150000],['FEATURED','ویژه',200000]].map(([code,name,priceToman],i)=>({code,name,kind:'BOOST',description:'افزایش دیده‌شدن آگهی منتشرشده در تالار.',priceToman,services:[code==='LADDER'?'به‌روزرسانی جایگاه آگهی و نمایش در پیشنهادها':'نمایش نشان و حضور در پیشنهادهای ویژه'],terms:'نمایش بیشتر به معنی تضمین فروش نیست. مدت خدمت از تأیید پرداخت محاسبه می‌شود.',durationHours:48,sortOrder:4+i,active:true})),
+  ...[['LADDER','نردبان',99000,320000],['URGENT','فوری',149000,700000],['FEATURED','ویژه',199000,720000]].map(([code,name,priceToman,originalPriceToman],i)=>({code,name,kind:'BOOST',description:'افزایش دیده‌شدن آگهی منتشرشده در تالار.',priceToman,originalPriceToman,services:[code==='LADDER'?'به‌روزرسانی جایگاه آگهی و نمایش در پیشنهادها':'نمایش نشان و حضور در پیشنهادهای ویژه'],terms:'نمایش بیشتر به معنی تضمین فروش نیست. مدت خدمت از تأیید پرداخت محاسبه می‌شود.',durationHours:48,sortOrder:4+i,active:true})),
 ];
 function expressEligible(data,now=new Date()){
   const current=data.year<1800?Number(new Intl.DateTimeFormat('en-US-u-ca-persian',{year:'numeric'}).formatToParts(now).find(p=>p.type==='year')?.value):now.getUTCFullYear();

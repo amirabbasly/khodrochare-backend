@@ -53,14 +53,14 @@ test('repair payment requires customer-approved parts and uses the stored total'
   assert.equal(result.cardNumber, undefined);
   assert.equal((await payments.getOrCreate('r', 'c')).id, result.id);
 });
-test('reporting a transfer never credits the driver; verification and completion are both required', async () => {
+test('reporting a transfer never credits the driver; verification credits immediately and completion cannot double credit', async () => {
   const request = { id: 'r', customerId: 'c', driverId: 'd', service: 'TOWING', priceToman: 1000000, status: 'ARRIVED' };
   const db = database(request); const payments = createPayments(db.prisma);
   await payments.getOrCreate('r', 'c');
   await payments.submit('r', 'c', { bankReference: '1234567890', transferredAt: new Date().toISOString() });
   assert.equal(db.payment().status, 'SUBMITTED'); assert.equal(db.earnings.size, 0);
   await payments.review('payment', true, 'bank-reviewer', 'Matched bank statement');
-  assert.equal(db.earnings.size, 0);
+  assert.equal(db.earnings.size, 1);
   request.status = 'COMPLETED';
   await settleEarning(db.tx, 'r'); await settleEarning(db.tx, 'r');
   assert.equal(db.earnings.size, 1); assert.equal(db.earnings.get('payment').amountToman, 800000);

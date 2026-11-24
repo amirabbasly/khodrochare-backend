@@ -5,8 +5,9 @@ const {createHall,listingDto,include,lock}=require('./service');
 const {draftSchema,priceInput,planSchema,bannerSchema,normalize,phone}=require('./domain');
 const uuid=z.string().uuid(),pageSchema=z.object({page:z.coerce.number().int().min(1).max(10000).default(1),limit:z.coerce.number().int().min(1).max(48).default(12)});
 const pagination=q=>({skip:(q.page-1)*q.limit,take:q.limit});
-function registerHall({app,prisma,redis,config,auth,admin,limit,io}){
+function registerHall({app,prisma,redis,config,auth,admin,limit,io,sms}){
   const service=createHall(prisma,config),root='/api/v1/hall',management='/api/v1/admin/hall';
+  const contactOtp=require('../customer-auth').createCustomerAuth({prisma,config,services:{},sms});
   app.use(management,admin);
   require('./chat').registerChat({app,prisma,redis,auth,limit,io});
   const captcha=require('./captcha').createCaptcha(redis);
@@ -33,6 +34,18 @@ function registerHall({app,prisma,redis,config,auth,admin,limit,io}){
     const draft=draftSchema.parse(req.body);res.status(201).json(listingDto(await prisma.hallListing.create({data:{ownerId:req.user.id,draft},include}),true));
   });
   app.get(root+'/mine/:id',auth,async(req,res)=>res.set('Cache-Control','no-store').json(listingDto(await service.owned(uuid.parse(req.params.id),req.user.id),true)));
+  app.post(root+'/mine/:id/contact/otp',auth,limit('hall-contact-otp',10,3600),async(req,res)=>{
+    if(req.user.role!=='CUSTOMER')throw new HttpError(403,'Customer role required');
+    const id=uuid.parse(req.params.id),input=z.object({phone:require('../domain').phone}).strict().parse(req.body);
+    await service.owned(id,req.user.id);
+    if(input.phone===req.user.phone)throw new HttpError(409,'شماره حساب شما نیاز به تأیید مجدد ندارد.');
+    res.set('Cache-Control','no-store').json(await contactOtp.requestCode({phone:input.phone,purpose:'HALL_CONTACT',context:`hall:${req.user.id}:${id}`}));
+  });
+  app.post(root+'/mine/:id/contact/verify',auth,limit('hall-contact-verify',30,900),async(req,res)=>{
+    if(req.user.role!=='CUSTOMER')throw new HttpError(403,'Customer role required');
+    const id=uuid.parse(req.params.id),input=z.object({challengeId:uuid,code:z.string().transform(require('../domain').digits).pipe(z.string().regex(/^\d{6}$/))}).strict().parse(req.body);
+    res.set('Cache-Control','no-store').json(await contactOtp.consume({...input,contact:{userId:req.user.id,listingId:id}}));
+  });
   app.patch(root+'/mine/:id',auth,async(req,res)=>{const input=z.object({version:z.number().int().nonnegative(),details:draftSchema}).strict().parse(req.body);res.json(await service.save(uuid.parse(req.params.id),req.user.id,input.details,input.version));});
   app.post(root+'/estimate',auth,limit('hall-estimate',40,60),async(req,res)=>res.json(await service.estimate(priceInput.parse(req.body),req.user.id)));
   app.post(root+'/mine/:id/captcha',auth,limit('hall-captcha',12,600),async(req,res)=>{const id=uuid.parse(req.params.id);await service.owned(id,req.user.id);res.set('Cache-Control','no-store').json(await captcha.issue(req.user.id,id));});
@@ -52,11 +65,11 @@ function registerHall({app,prisma,redis,config,auth,admin,limit,io}){
     const mimeType=buffer?.subarray(0,3).equals(Buffer.from([255,216,255]))?'image/jpeg':buffer?.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]))?'image/png':null;
     if(!mimeType)throw new HttpError(400,'تصویر JPEG یا PNG با حجم کمتر از ۵ مگابایت انتخاب کنید.');
     const key='hall-'+randomUUID(),filename=path.resolve(config.UPLOAD_DIR,key);await fs.mkdir(config.UPLOAD_DIR,{recursive:true});await fs.writeFile(filename,buffer,{flag:'wx',mode:0o600});
-    try{const photo=await prisma.$transaction(async tx=>{await lock(tx,id);const row=await service.owned(id,req.user.id,tx);await service.editable(tx,row);if(row.photos.length>=5)throw new HttpError(400,'حداکثر ۵ تصویر مجاز است.');return tx.hallPhoto.create({data:{listingId:id,storageKey:key,mimeType,position:row.photos.length}});});res.status(201).json({id:photo.id,url:`/hall/photos/${photo.id}?token=${photo.readToken}`});}catch(e){await fs.unlink(filename).catch(()=>{});throw e;}
+    try{const photo=await prisma.$transaction(async tx=>{await lock(tx,id);const row=await service.owned(id,req.user.id,tx);await service.editable(tx,row);if(row.photos.length>=5)throw new HttpError(400,'حداکثر ۵ تصویر مجاز است.');await service.photosChanged(tx,row);return tx.hallPhoto.create({data:{listingId:id,storageKey:key,mimeType,position:row.photos.length}});});res.status(201).json({id:photo.id,url:`/hall/photos/${photo.id}?token=${photo.readToken}`});}catch(e){await fs.unlink(filename).catch(()=>{});throw e;}
   });
   app.delete(root+'/mine/:id/photos/:photoId',auth,async(req,res)=>{
     const id=uuid.parse(req.params.id),photoId=uuid.parse(req.params.photoId);
-    const photo=await prisma.$transaction(async tx=>{await lock(tx,id);const row=await service.owned(id,req.user.id,tx);await service.editable(tx,row);if(row.status==='PUBLISHED'&&row.photos.length<=1)throw new HttpError(400,'حداقل یک تصویر باید باقی بماند.');const photo=row.photos.find(p=>p.id===photoId);if(!photo)throw new HttpError(404,'تصویر پیدا نشد.');await tx.hallPhoto.delete({where:{id:photoId}});return photo;});await fs.unlink(path.resolve(config.UPLOAD_DIR,photo.storageKey)).catch(()=>{});res.status(204).end();
+    const photo=await prisma.$transaction(async tx=>{await lock(tx,id);const row=await service.owned(id,req.user.id,tx);await service.editable(tx,row);if(row.status==='PUBLISHED'&&row.photos.length<=1)throw new HttpError(400,'حداقل یک تصویر باید باقی بماند.');const photo=row.photos.find(p=>p.id===photoId);if(!photo)throw new HttpError(404,'تصویر پیدا نشد.');await service.photosChanged(tx,row);await tx.hallPhoto.delete({where:{id:photoId}});return photo;});await fs.unlink(path.resolve(config.UPLOAD_DIR,photo.storageKey)).catch(()=>{});res.status(204).end();
   });
   app.get(root+'/photos/:id',async(req,res)=>{
     const photo=await prisma.hallPhoto.findUnique({where:{id:uuid.parse(req.params.id)},include:{listing:{select:{status:true}}}});

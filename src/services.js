@@ -18,7 +18,7 @@ function createServices({ prisma, redis, config, io }) {
   async function authenticateSession(token) {
     if (typeof token !== 'string' || !/^[a-f0-9]{64}$/.test(token)) throw new HttpError(401, 'Authentication required');
     const found = await prisma.session.findUnique({ where: { tokenHash: hash(token) }, include: { user: true } });
-    if (!found || found.user.deletedAt || found.expiresAt <= new Date()) throw new HttpError(401, 'Session expired');
+    if (!found || found.user.isActive === false || found.user.deletedAt || found.expiresAt <= new Date()) throw new HttpError(401, 'Session expired');
     let expiresAt = found.expiresAt;
     const lifetime = config?.SESSION_DAYS * 86400000;
     if (lifetime && expiresAt.getTime() - Date.now() < lifetime / 2) {
@@ -55,7 +55,7 @@ function createServices({ prisma, redis, config, io }) {
     return { meters: Math.round(row.meters), method: 'POSTGIS_GEODESIC' };
   }
   async function ownedRequest(id, user) {
-    const request = await prisma.assistanceRequest.findUnique({ where: { id } });
+    const request = await prisma.assistanceRequest.findUnique({ where: { id }, include: { customer: { select: { fullName: true } }, driver: { select: { fullName: true } }, payment: { select: { status: true, amountToman: true, driverShareToman: true, method:true,cashReportedAt:true, checkouts: { where: { mode: 'live', status: 'VERIFIED' }, select: { id: true }, take: 1 } } } } });
     if (!request || (request.customerId !== user.id && request.driverId !== user.id)) throw new HttpError(404, 'Request not found');
     return isPendingRequestExpired(request) ? { ...request, status: 'EXPIRED' } : request;
   }
@@ -97,11 +97,11 @@ function createServices({ prisma, redis, config, io }) {
     const now = new Date();
     const prepared = service === 'TOWING' ? await prepareTowing(input, now) : null;
     let repairAddress = null;
-    if (service === 'REPAIR' && config?.PHOTON_URL) { try { repairAddress = await geocoder.resolve(null, input.origin); } catch {} }
+    if (service !== 'TOWING' && config?.PHOTON_URL) { try { repairAddress = await geocoder.resolve(null, input.origin); } catch {} }
     const route = prepared?.route;
     if (prepared) input = prepared.input;
     if (route && route.meters < 1) throw new HttpError(400, 'Origin and destination must differ');
-    const pricing = prepared?.pricing || quote({ ...input, service, at: now });
+    const pricing = require('./onsite-services').SERVICES.includes(service) ? require('./onsite-services').estimate(service,input,config) : prepared?.pricing || quote({ ...input, service, at: now });
     return prisma.$transaction(async tx => {
       const request = await tx.assistanceRequest.create({ data: {
         customerId: user.id, service, vehicleName: input.vehicleName, vehiclePlate: input.vehiclePlate,
@@ -115,6 +115,7 @@ function createServices({ prisma, redis, config, io }) {
       } });
       await tx.$executeRaw`UPDATE "AssistanceRequest" SET origin=ST_SetSRID(ST_MakePoint(${input.origin.longitude},${input.origin.latitude}),4326)::geography WHERE id=${request.id}`;
       if (input.destination) await tx.$executeRaw`UPDATE "AssistanceRequest" SET destination=ST_SetSRID(ST_MakePoint(${input.destination.longitude},${input.destination.latitude}),4326)::geography WHERE id=${request.id}`;
+      await require('./operator/locations').captureRequestLocations(tx, request, {id:user.id,role:'SYSTEM',name:'ثبت خودکار درخواست'}, 'REQUEST_CREATED', config?.LOCATION_MAX_AGE_SECONDS || 120);
       await tx.outbox.create({ data: { requestId: request.id } });
       return request;
     });

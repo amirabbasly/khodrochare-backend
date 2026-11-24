@@ -78,8 +78,9 @@ function createGatewayPayments(prisma,config,provider=createZarinpal(config)){
         const request=await tx.assistanceRequest.findUnique({where:{id:payment.requestId}});
         const status=request.status==='CANCELLED'||isRequestExpired(request)?'REFUND_REQUIRED':checkout.mode==='sandbox'?'SANDBOX_VERIFIED':'VERIFIED';
         const livePending=checkout.mode==='sandbox'&&await tx.gatewayCheckout.findFirst({where:{paymentId:payment.id,mode:'live',status:{in:['CREATING','PENDING']}}});
-        if(latest.status!=='VERIFIED'&&!livePending)await tx.payment.update({where:{id:payment.id},data:{status,verifiedAt:new Date()}});
+        if(latest.status!=='VERIFIED'&&!livePending)await tx.payment.update({where:{id:payment.id},data:{status,method:'GATEWAY',verifiedAt:new Date()}});
         await settleEarning(tx,payment.requestId);
+        if (status === 'VERIFIED' && request.service === 'REPAIR' && request.operationsStartedAt && !request.driverCommissionConfirmedAt) await tx.assistanceRequest.update({where:{id:request.id},data:{driverCommissionConfirmedAt:new Date()}});
         await tx.outbox.create({data:{requestId:payment.requestId}});
         if(status==='REFUND_REQUIRED')return tx.gatewayCheckout.update({where:{id},data:{status:'REFUND_REQUIRED',errorCode:'REFUND_REVIEW_REQUIRED'}});
       }
@@ -87,8 +88,8 @@ function createGatewayPayments(prisma,config,provider=createZarinpal(config)){
     });
   }
   async function wallet(userId){
-    const[groups,entries]=await Promise.all([prisma.walletEntry.groupBy({by:['mode'],where:{userId},_sum:{amountToman:true}}),prisma.walletEntry.findMany({where:{userId},orderBy:{createdAt:'desc'},take:50,select:{id:true,mode:true,amountToman:true,createdAt:true}})]);
-    return{balanceToman:groups.find(g=>g.mode==='live')?._sum.amountToman||0,sandboxBalanceToman:groups.find(g=>g.mode==='sandbox')?._sum.amountToman||0,mode:provider.mode,entries};
+    const[groups,entries,earnings]=await Promise.all([prisma.walletEntry.groupBy({by:['mode'],where:{userId},_sum:{amountToman:true}}),prisma.walletEntry.findMany({where:{userId},orderBy:{createdAt:'desc'},take:50,select:{id:true,mode:true,amountToman:true,createdAt:true}}),prisma.driverEarning.aggregate({where:{driverId:userId,payment:{method:{not:'CASH'}}},_sum:{amountToman:true}})]);
+    return{balanceToman:(groups.find(g=>g.mode==='live')?._sum.amountToman||0)+(earnings._sum.amountToman||0),sandboxBalanceToman:groups.find(g=>g.mode==='sandbox')?._sum.amountToman||0,mode:provider.mode,entries};
   }
   return{start,verify,wallet,present};
 }

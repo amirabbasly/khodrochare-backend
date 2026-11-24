@@ -1,17 +1,17 @@
 const { HttpError } = require('./domain');
 const { isRequestExpired } = require('./request-expiry');
 function splitAmount(service, serviceToman, partsToman = 0) {
-  if (!['REPAIR', 'TOWING'].includes(service)) throw new HttpError(400, 'Unsupported payment service');
+  if (!['REPAIR', 'TOWING','MOBILE_CARWASH','PERIODIC_SERVICE','INSPECTION'].includes(service)) throw new HttpError(400, 'Unsupported payment service');
   const amountToman = serviceToman + partsToman;
-  if (![serviceToman, partsToman].every(n => Number.isSafeInteger(n) && n >= 0) || amountToman < 1 || amountToman > 2147483647) throw new HttpError(400, 'Invalid payment amount');
-  const commissionPercent = service === 'REPAIR' ? 30 : 20;
+  if (![serviceToman, partsToman].every(n => Number.isSafeInteger(n) && n >= 0) || (amountToman < 1 && service !== 'PERIODIC_SERVICE') || amountToman > 2147483647) throw new HttpError(400, 'Invalid payment amount');
+  const commissionPercent = service === 'TOWING' ? 20 : 30;
   const commissionToman = Math.round(amountToman * commissionPercent / 100);
   return { serviceToman, partsToman, amountToman, commissionPercent, commissionToman, driverShareToman: amountToman - commissionToman };
 }
 async function lockRequest(tx, id) { await tx.$queryRaw`SELECT id FROM "AssistanceRequest" WHERE id=${id} FOR UPDATE`; }
 async function settleEarning(tx, requestId) {
   const request = await tx.assistanceRequest.findUnique({ where: { id: requestId }, include: { payment: true } });
-  if (request?.status !== 'COMPLETED' || !request.driverId || request.payment?.status !== 'VERIFIED') return;
+  if (!request || ['CANCELLED', 'EXPIRED'].includes(request.status) || !request.driverId || request.payment?.status !== 'VERIFIED') return;
   const payment = request.payment;
   await tx.driverEarning.createMany({ data: [{ paymentId: payment.id, driverId: request.driverId, amountToman: payment.driverShareToman, commissionToman: payment.commissionToman }], skipDuplicates: true });
 }
@@ -26,9 +26,9 @@ function createPayments(prisma) {
       const existing = await tx.payment.findUnique({ where: { requestId }, include: { attempts: { orderBy: { createdAt: 'desc' }, take: 1 } } });
       if (existing) return existing;
       if (request.priceToman == null) throw new HttpError(409, 'Final service amount requires agreement');
-      if (request.service === 'REPAIR' && request.partsApprovedToman == null) throw new HttpError(409, 'Parts quote must be approved before payment');
+      if (['REPAIR','PERIODIC_SERVICE'].includes(request.service) && request.partsApprovedToman == null) throw new HttpError(409, 'Parts quote must be approved before payment');
       const amounts = splitAmount(request.service, request.priceToman, request.partsApprovedToman || 0);
-      return tx.payment.create({ data: { requestId, ...amounts }, include: { attempts: true } });
+      return tx.payment.create({ data: { requestId, ...amounts, ...(amounts.amountToman===0?{status:'VERIFIED',method:'FREE',verifiedAt:new Date()}: {}) }, include: { attempts: true } });
     });
   }
   async function submit(requestId, customerId, input) {

@@ -1,6 +1,10 @@
 require('dotenv').config({ quiet: true });
 const { z } = require('zod');
 const config = z.object({
+  ON_SITE_TARIFFS_JSON: z.string().optional(),
+  WALLET_TRANSFER_CARD: z.string().default(''),
+  WALLET_TRANSFER_ACCOUNT: z.string().default(''),
+  OPERATOR_BRIDGE_SECRET: z.string().min(32).optional(),
   NIAZPARDAZ_API_KEY: z.string().trim().default(''),
   NIAZPARDAZ_SENDER: z.string().regex(/^\d{4,20}$/).default('10009611'),
   NIAZPARDAZ_TRANSPORT: z.enum(['sdk', 'https']).default('sdk'),

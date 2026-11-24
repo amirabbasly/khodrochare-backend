@@ -1,6 +1,6 @@
 const PENDING_REQUEST_LIFETIME_MS = 6 * 60 * 60 * 1000;
 const pendingRequestCutoff = (now = new Date()) => new Date(now.getTime() - PENDING_REQUEST_LIFETIME_MS);
-const isPendingRequestExpired = (request, now = new Date()) => request.status === 'PENDING' && !request.driverId && new Date(request.createdAt) <= pendingRequestCutoff(now);
+const isPendingRequestExpired = (request, now = new Date()) => request.status === 'PENDING' && !request.driverId && !request.operatorConfirmedAt && new Date(request.createdAt) <= pendingRequestCutoff(now);
 const isRequestExpired = (request, now = new Date()) => request.status === 'EXPIRED' || isPendingRequestExpired(request, now);
 
 // Row locks and a conditional UPDATE serialize expiration against acceptance.
@@ -11,7 +11,7 @@ async function expirePendingRequests(prisma, now = new Date(), limit = 200) {
     const rows = await tx.$queryRaw`
       WITH due AS (
         SELECT id FROM "AssistanceRequest"
-        WHERE status = 'PENDING' AND "driverId" IS NULL AND "createdAt" <= ${cutoff}
+        WHERE status = 'PENDING' AND "driverId" IS NULL AND "operatorConfirmedAt" IS NULL AND "createdAt" <= ${cutoff}
         ORDER BY "createdAt", id LIMIT ${limit} FOR UPDATE SKIP LOCKED
       )
       UPDATE "AssistanceRequest" AS request

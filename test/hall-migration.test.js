@@ -18,9 +18,11 @@ test('actual Hall migrations and Prisma HTTP deletion reproduce the old CHECK fa
   try{
     // Only the foreign-key target is a fixture. The Hall tables and constraints are
     // created from the exact deployed migrations, not copies or JavaScript mocks.
-    await db.exec(`CREATE TABLE "User" (id TEXT PRIMARY KEY, "fullName" TEXT NOT NULL DEFAULT 'Fixture user')`);
+    await db.exec(`CREATE TABLE "User" (id TEXT PRIMARY KEY, "fullName" TEXT NOT NULL DEFAULT 'Fixture user', phone TEXT DEFAULT '09901234567')`);
     await db.exec(await migration('202611180003_car_hall'));
     await db.exec(await migration('202611190001_hall_chat'));
+    await db.exec(`ALTER TABLE "HallListing" ADD COLUMN "verifiedContactPhone" TEXT, ADD COLUMN "submittedAt" TIMESTAMP(3), ADD COLUMN "reviewedAt" TIMESTAMP(3), ADD COLUMN "reviewedBy" TEXT, ADD COLUMN "moderationNote" TEXT;
+      ALTER TABLE "HallPlan" ADD COLUMN "originalPriceToman" INTEGER`);
     await tcp.start();
     prisma=new PrismaClient({datasources:{db:{url:`postgresql://postgres:postgres@${tcp.getServerConn()}/postgres?schema=public&connection_limit=1&sslmode=disable`}}});
     const owner=randomUUID(),buyer=randomUUID(),stranger=randomUUID();
@@ -31,7 +33,7 @@ test('actual Hall migrations and Prisma HTTP deletion reproduce the old CHECK fa
     const conversation=await prisma.hallConversation.create({data:{listingId:listing.id,buyerId:buyer,sellerId:owner}});
     await prisma.hallMessage.create({data:{conversationId:conversation.id,senderId:buyer,clientId:randomUUID(),body:'Saved conversation'}});
     const proofs=new Map(),errors=[],app=express();app.use(express.json());
-    registerHall({app,prisma,redis:{getdel:async key=>{const value=proofs.get(key);proofs.delete(key);return value;}},config:{},auth:(req,res,next)=>{if(![owner,buyer,stranger].includes(req.headers.authorization))return res.sendStatus(401);req.user={id:req.headers.authorization};next();},admin:(_req,res)=>res.sendStatus(401),limit:()=>((_req,_res,next)=>next())});
+    registerHall({app,prisma,redis:{getdel:async key=>{const value=proofs.get(key);proofs.delete(key);return value;}},config:{UPLOAD_DIR:require('node:os').tmpdir()},auth:(req,res,next)=>{if(![owner,buyer,stranger].includes(req.headers.authorization))return res.sendStatus(401);req.user={id:req.headers.authorization};next();},admin:(_req,res)=>res.sendStatus(401),limit:()=>((_req,_res,next)=>next())});
     app.use((error,_req,res,_next)=>{errors.push(error);res.status(error.status||500).json({error:'request failed'});});
     server=app.listen(0,'127.0.0.1');await new Promise(resolve=>server.once('listening',resolve));
     const base=`http://127.0.0.1:${server.address().port}/api/v1/hall`;
@@ -41,6 +43,7 @@ test('actual Hall migrations and Prisma HTTP deletion reproduce the old CHECK fa
     assert.equal((await prisma.hallListing.findUnique({where:{id:listing.id}})).version,2);
 
     await db.exec(await migration('202611190002_hall_deleted_status'));
+    await db.exec(`ALTER TABLE "HallListing" DROP CONSTRAINT "HallListing_status_check"; ALTER TABLE "HallListing" ADD CONSTRAINT "HallListing_status_check" CHECK(status IN ('DRAFT','PENDING_REVIEW','REJECTED','PUBLISHED','BLOCKED','SOLD','DELETED'))`);
     assert.equal((await remove(listing.id,stranger)).status,404);
     assert.equal((await remove(listing.id)).status,204);
     assert.equal((await remove(listing.id)).status,204,'deletion retries are idempotent');
@@ -70,9 +73,20 @@ test('actual Hall migrations and Prisma HTTP deletion reproduce the old CHECK fa
     await prisma.hallPhoto.create({data:{listingId:draft.id,storageKey:'fixture-'+randomUUID(),mimeType:'image/png'}});
     const proof=randomUUID();proofs.set(`hall:captcha:proof:${owner}:${draft.id}:${proof}`,'1');
     const published=await fetch(`${base}/mine/${draft.id}/publish`,{method:'POST',headers:{authorization:owner,'Content-Type':'application/json'},body:JSON.stringify({proof})});assert.equal(published.status,200);
+    assert.equal((await prisma.hallListing.findUnique({where:{id:draft.id}})).status,'PENDING_REVIEW');
+    assert.equal((await fetch(`${base}/listings/${draft.id}`)).status,404);
+    const approved=await prisma.hallListing.update({where:{id:draft.id},data:{status:'PUBLISHED',publishedAt:new Date(),version:{increment:1}}});
     let publicAd=await (await fetch(`${base}/listings/${draft.id}`)).json();assert.equal(publicAd.gearboxType,'اتوماتیک');assert.equal(publicAd.fuelType,'بنزین');assert.equal(publicAd.location.radiusMeters,2000);assert.notEqual(publicAd.location.latitude,details.location.latitude);assert.ok(!JSON.stringify(publicAd).includes(details.location.address));
-    await patch(saved.version,{...details,location:{...details.location,visibility:'EXACT'}});
+    await patch(approved.version,{...details,location:{...details.location,visibility:'EXACT'}});
+    assert.equal((await fetch(`${base}/listings/${draft.id}`)).status,404);
+    await prisma.hallListing.update({where:{id:draft.id},data:{status:'PUBLISHED'}});
     publicAd=await (await fetch(`${base}/listings/${draft.id}`)).json();assert.equal(publicAd.location.latitude,details.location.latitude);assert.equal(publicAd.location.radiusMeters,0);assert.equal(publicAd.location.address,details.location.address);
+    const extraPhoto=await prisma.hallPhoto.create({data:{listingId:draft.id,storageKey:'extra-photo',mimeType:'image/png'}});
+    const beforePhotoEdit=await prisma.hallListing.findUnique({where:{id:draft.id}});
+    const deletion=await fetch(`${base}/mine/${draft.id}/photos/${extraPhoto.id}`,{method:'DELETE',headers:{authorization:owner}});
+    assert.equal(deletion.status,204);const photoEdited=await prisma.hallListing.findUnique({where:{id:draft.id}});
+    assert.equal(photoEdited.status,'PENDING_REVIEW');assert.equal(photoEdited.version,beforePhotoEdit.version+1);
+    assert.equal((await fetch(`${base}/listings/${draft.id}`)).status,404,'photo edits must not bypass moderation');
     assert.equal(errors.filter(e=>!e.status).length,1,'only the deliberately reproduced old schema fails');
   }finally{
     if(server)await new Promise(resolve=>server.close(resolve));

@@ -51,7 +51,7 @@ test('towing snapshots canonical database model, database rates and cached addre
   const redis = memoryRedis();
   for (const [id, latitude, label] of [['a', 35.7, 'تهران، ولیعصر'], ['b', 35.8, 'تهران، آزادی']]) await redis.set(`place:${id.repeat(64)}`, JSON.stringify({ latitude, longitude: 51.4, label }));
   let saved;
-  const tx = { assistanceRequest: { create: async ({ data }) => { saved = data; return { id: 'request', ...data }; } }, $executeRaw: async () => 1, outbox: { create: async () => {} } };
+  const tx = { userLocation:{findUnique:async()=>null}, operatorAudit:{create:async()=>({})}, assistanceRequest: { create: async ({ data }) => { saved = data; return { id: 'request', ...data }; } }, $executeRaw: async () => 1, outbox: { create: async () => {} } };
   const prisma = { vehicleModel: { findUnique: async () => ({ id: 'model', name: 'پژو 206', groupId: 'GROUP_1', group: { version: 'custom-db-rate', nissanBaseToman: 100000, nissanPerKmToman: 10000 } }) }, $queryRaw: async () => [{ meters: 1000 }], $transaction: callback => callback(tx) };
   const s = createServices({ prisma, redis, config: { DISTANCE_MODE: 'geodesic' } });
   await s.createRequest({ id: 'customer' }, { vehicleModelId: 'model', vehicleName: 'fake name', vehiclePlate: '12ب34567', origin: { latitude: 0, longitude: 0 }, destination: { latitude: 0, longitude: 0 }, originPlaceId: 'a'.repeat(64), destinationPlaceId: 'b'.repeat(64), transportKind: 'NISSAN' }, 'TOWING');

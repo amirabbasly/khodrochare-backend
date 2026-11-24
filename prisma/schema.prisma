@@ -33,6 +33,7 @@ model User {
   passwordHash String?
   phoneVerifiedAt DateTime?
   deletedAt DateTime?
+  isActive Boolean @default(true)
   vehiclePlate String?
   vehicleType String?
   services Service[]
@@ -49,6 +50,7 @@ model User {
   marketAlerts MarketAlert[]
   earnings DriverEarning[]
   checkouts GatewayCheckout[]
+  walletReceipts WalletReceipt[]
   walletEntries WalletEntry[]
   hallListings HallListing[]
   hallOrders HallOrder[]
@@ -73,6 +75,7 @@ model CustomerOtpChallenge {
   id String @id @default(uuid())
   phone String
   purpose String
+  context String?
   codeHash String
   status String @default("SENDING")
   attempts Int @default(0)
@@ -145,6 +148,10 @@ model AssistanceRequest {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   acceptedAt DateTime?
+  operatorConfirmedAt DateTime?
+  operatorActorId String?
+  operatorActorName String?
+  operatorNotes String?
   @@index([customerId, createdAt])
   @@index([driverId, status])
   @@index([status, service])
@@ -175,6 +182,9 @@ model Payment {
   id String @id @default(uuid())
   requestId String @unique
   request AssistanceRequest @relation(fields: [requestId], references: [id])
+  method String @default("GATEWAY")
+  cashReportedAt DateTime?
+  cashWalletEntry WalletEntry?
   status String @default("AWAITING_PAYMENT")
   serviceToman Int
   partsToman Int
@@ -216,8 +226,12 @@ model WalletEntry {
   id String @id @default(uuid())
   userId String
   user User @relation(fields:[userId],references:[id])
-  checkoutId String @unique
-  checkout GatewayCheckout @relation(fields:[checkoutId],references:[id])
+  checkoutId String? @unique
+  checkout GatewayCheckout? @relation(fields:[checkoutId],references:[id])
+  receiptId String? @unique
+  receipt WalletReceipt? @relation(fields:[receiptId],references:[id])
+  paymentId String? @unique
+  payment Payment? @relation(fields:[paymentId],references:[id])
   amountToman Int
   mode String
   createdAt DateTime @default(now())
@@ -733,6 +747,11 @@ model HallListing {
   status String @default("DRAFT")
   version Int @default(0)
   draft Json @default("{}")
+  verifiedContactPhone String?
+  submittedAt DateTime?
+  reviewedAt DateTime?
+  reviewedBy String?
+  moderationNote String?
   make String @default("")
   model String @default("")
   trim String @default("")
@@ -781,6 +800,7 @@ model HallPlan {
   kind String @default("PLAN")
   description String
   priceToman Int
+  originalPriceToman Int?
   services String[]
   terms String
   active Boolean @default(true)
@@ -898,4 +918,35 @@ model SupportMessage {
   body String
   createdAt DateTime @default(now())
   @@index([ticketId,createdAt,id])
+}
+
+model OperatorAudit {
+  id String @id @default(uuid())
+  actorId String
+  actorRole String
+  actorName String
+  action String
+  targetId String
+  details Json @default("{}")
+  createdAt DateTime @default(now())
+  @@index([targetId,createdAt])
+}
+
+model WalletReceipt {
+  version Int @default(0)
+  id String @id @default(uuid())
+  userId String
+  user User @relation(fields:[userId],references:[id])
+  amountToman Int
+  bankReference String @unique
+  storageKey String @unique
+  mimeType String
+  status String @default("SUBMITTED")
+  reviewNote String?
+  reviewedBy String?
+  reviewedAt DateTime?
+  createdAt DateTime @default(now())
+  entry WalletEntry?
+  @@index([status,createdAt])
+  @@index([userId,createdAt])
 }

@@ -47,10 +47,10 @@ test('telemetry rejects unauthenticated, stale and invalid coordinates without g
   assert.equal((await call('/me/location', 'PUT', { latitude: 91, longitude: 51, recordedAt: new Date().toISOString() }, 'customer')).status, 400);
   assert.equal((await call('/me/location', 'PUT', { latitude: 35, longitude: 51, recordedAt: new Date(Date.now()-180000).toISOString() }, 'customer')).status, 400);
 });
-test('repair completion requires the assigned driver persisted confirmation without verifying a bank payment', async t => {
+test('repair completion requires persisted driver confirmation AND verified payment', async t => {
   let credits = 0;
   let request = { id: 'a', customerId: 'customer', driverId: 'driver', service: 'REPAIR', status: 'ARRIVED', partsApprovedToman: null, operationsStartedAt: null, payment: { status: 'SUBMITTED' } };
-  const tx = { $queryRaw: async () => [], assistanceRequest: { findUnique: async () => request, update: async ({ data }) => (request = { ...request, ...data }), updateMany: async ({ data }) => { request = { ...request, ...data }; return { count: 1 }; } }, outbox: { create: async () => {} }, driverEarning: { createMany: async () => { credits++; } } };
+  const tx = { payment:{findUnique:async()=>request.payment}, $queryRaw: async () => [], assistanceRequest: { findUnique: async () => request, update: async ({ data }) => (request = { ...request, ...data }), updateMany: async ({ data }) => { request = { ...request, ...data }; return { count: 1 }; } }, outbox: { create: async () => {} }, driverEarning: { createMany: async () => { credits++; } } };
   const { call } = await fixture(t, { prisma: { $transaction: async fn => fn(tx) }, services: { ownedRequest: async () => request } });
   assert.equal((await call('/requests/a/operations/start', 'POST', undefined, 'other-driver')).status, 404);
   assert.equal((await call('/requests/a/operations/start', 'POST', undefined, 'customer')).status, 403);
@@ -72,8 +72,10 @@ test('repair completion requires the assigned driver persisted confirmation with
   assert.equal((await call('/requests/a/commission-confirm', 'POST', { confirmed: true }, 'driver')).status, 200);
   assert.equal(request.driverCommissionConfirmedAt, confirmedAt);
   assert.equal(request.payment.status, 'SUBMITTED');
+  assert.equal((await call('/requests/a/status', 'PATCH', { status: 'COMPLETED' }, 'driver')).status, 409);
+  request.payment.status='VERIFIED';
   assert.equal((await call('/requests/a/status', 'PATCH', { status: 'COMPLETED' }, 'driver')).status, 200);
-  assert.equal(credits, 0);
+  assert.equal(credits, 1);
   assert.equal(request.status, 'COMPLETED');
-  assert.equal(request.payment.status, 'SUBMITTED');
+  assert.equal(request.payment.status, 'VERIFIED');
 });
