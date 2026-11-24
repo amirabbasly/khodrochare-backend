@@ -144,7 +144,7 @@ function createApp({ prisma, redis, config, io, services: s, otpSms }) {
   app.get('/api/v1/services/onsite',auth,(_req,res)=>res.set('Cache-Control','no-store').json(require('./onsite-services').catalog(config)));
   app.post('/api/v1/services/onsite/:service/estimate',auth,role('CUSTOMER'),limit('onsite-estimate',60,60),async(req,res)=>res.json(require('./onsite-services').estimate(req.params.service,require('./onsite-services').estimateSchema.parse(req.body),config)));
   app.post('/api/v1/requests/:id/payment/cash',auth,role('CUSTOMER'),async(req,res)=>{z.object({confirmed:z.literal(true)}).strict().parse(req.body);res.json(require('./gateway-payments').safePayment(await cashPayments.report(req.params.id,req.user.id),config.ZARINPAL_MODE));});
-  app.post('/api/v1/requests/:id/payment/cash/confirm',auth,role('DRIVER'),async(req,res)=>{z.object({confirmed:z.literal(true)}).strict().parse(req.body);res.json(require('./gateway-payments').safePayment(await cashPayments.confirm(req.params.id,req.user.id),config.ZARINPAL_MODE));});
+  app.post('/api/v1/requests/:id/payment/cash/confirm',auth,role('DRIVER'),async(req,res)=>{z.object({confirmed:z.literal(true)}).strict().parse(req.body);res.json(require('./gateway-payments').safePayment(await cashPayments.confirm(req.params.id,req.user.id,{allowUnreported:true}),config.ZARINPAL_MODE));});
   app.post('/api/v1/requests/towing/estimate', auth, role('CUSTOMER'), limit('estimate', 40, 60), async (req, res) => res.json(await s.estimateTowing(d.towing.parse(req.body))));
   app.post('/api/v1/requests/:id/parts-quote', auth, role('DRIVER'), async (req, res) => {
     const { amountToman } = z.object({ amountToman: z.number().int().min(0).max(1000000000) }).strict().parse(req.body);
@@ -191,16 +191,25 @@ function createApp({ prisma, redis, config, io, services: s, otpSms }) {
   }
   app.post('/api/v1/requests/:id/commission-confirm', auth, role('DRIVER'), async (req, res) => {
     z.object({ confirmed: z.literal(true) }).strict().parse(req.body);
-    res.json(await prisma.$transaction(async tx => {
-      await lockRequest(tx, req.params.id);
-      const request = await tx.assistanceRequest.findUnique({ where: { id: req.params.id } });
-      if (!request || request.driverId !== req.user.id) throw new d.HttpError(404, 'Request not found');
-      if (!['REPAIR','PERIODIC_SERVICE'].includes(request.service) || request.status !== 'ARRIVED' || !request.operationsStartedAt || request.partsApprovedToman == null) throw new d.HttpError(409, 'Operations must start before commission confirmation');
-      if (request.driverCommissionConfirmedAt) return request;
-      const result = await tx.assistanceRequest.update({ where: { id: request.id }, data: { driverCommissionConfirmedAt: new Date() } });
-      await tx.outbox.create({ data: { requestId: request.id } });
-      return result;
-    }));
+    const outcome=await prisma.$transaction(async tx=>{
+      await lockRequest(tx,req.params.id);
+      const request=await tx.assistanceRequest.findUnique({where:{id:req.params.id}});
+      if(!request||request.driverId!==req.user.id)throw new d.HttpError(404,'Request not found');
+      if(!['REPAIR','PERIODIC_SERVICE'].includes(request.service)||request.status!=='ARRIVED'||!request.operationsStartedAt||request.partsApprovedToman==null)throw new d.HttpError(409,'Operations must start before commission confirmation');
+      const payment=await tx.payment.findUnique({where:{requestId:request.id}});
+      const paid=payment?.status==='VERIFIED'||config.ZARINPAL_MODE!=='live'&&payment?.status==='SANDBOX_VERIFIED';
+      if(!paid){
+        if(payment&&!['AWAITING_TRANSFER','AWAITING_PAYMENT','REJECTED'].includes(payment.status))throw new d.HttpError(409,'ابتدا پرداخت در جریان را تعیین تکلیف کنید.');
+        return {needsCash:true};
+      }
+      if(request.driverCommissionConfirmedAt)return {request};
+      const updated=await tx.assistanceRequest.update({where:{id:request.id},data:{driverCommissionConfirmedAt:new Date()}});
+      await tx.outbox.create({data:{requestId:request.id}});return {request:updated};
+    });
+    if(outcome.needsCash){
+      await cashPayments.confirm(req.params.id,req.user.id,{allowUnreported:true});
+      res.json(await prisma.$transaction(tx=>tx.assistanceRequest.findUnique({where:{id:req.params.id}})));
+    }else res.json(outcome.request);
   });
   app.post('/api/v1/requests/:id/operations/start', auth, role('DRIVER'), async (req, res) => {
     res.json(await prisma.$transaction(async tx => {

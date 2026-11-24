@@ -66,11 +66,14 @@ test('repair completion requires persisted driver confirmation AND verified paym
   assert.equal((await call('/requests/a/commission-confirm', 'POST', { confirmed: true }, 'customer')).status, 403);
   assert.equal((await call('/requests/a/commission-confirm', 'POST', { confirmed: true }, 'other-driver')).status, 404);
   assert.equal((await call('/requests/a/commission-confirm', 'POST', { confirmed: false }, 'driver')).status, 400);
+  assert.equal((await call('/requests/a/commission-confirm', 'POST', { confirmed: true }, 'driver')).status, 409);
+  request.payment.status='VERIFIED';
   assert.equal((await call('/requests/a/commission-confirm', 'POST', { confirmed: true }, 'driver')).status, 200);
   const confirmedAt = request.driverCommissionConfirmedAt;
   assert.ok(confirmedAt);
   assert.equal((await call('/requests/a/commission-confirm', 'POST', { confirmed: true }, 'driver')).status, 200);
   assert.equal(request.driverCommissionConfirmedAt, confirmedAt);
+  request.payment.status='SUBMITTED';
   assert.equal(request.payment.status, 'SUBMITTED');
   assert.equal((await call('/requests/a/status', 'PATCH', { status: 'COMPLETED' }, 'driver')).status, 409);
   request.payment.status='VERIFIED';

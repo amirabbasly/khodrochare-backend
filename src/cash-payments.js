@@ -12,14 +12,25 @@ function createCashPayments(prisma){
    const result=await tx.payment.update({where:{id:payment.id},data:{method:'CASH_PENDING',cashReportedAt:new Date(),status:'AWAITING_PAYMENT'}});await tx.outbox.create({data:{requestId}});return result;
   });
  }
- async function confirm(requestId,driverId){return prisma.$transaction(async tx=>{
+ async function confirm(requestId,driverId,{allowUnreported=false}={}){
+  if(allowUnreported){
+   const owned=await prisma.assistanceRequest.findUnique({where:{id:requestId}});
+   if(!owned||owned.driverId!==driverId)throw new HttpError(404,'درخواست پیدا نشد.');
+   await createPayments(prisma).getOrCreate(requestId,owned.customerId);
+  }
+  return prisma.$transaction(async tx=>{
   await tx.$queryRaw`SELECT id FROM "User" WHERE id=${driverId} FOR UPDATE`;await lockRequest(tx,requestId);
   const request=await tx.assistanceRequest.findUnique({where:{id:requestId}}),payment=await tx.payment.findUnique({where:{requestId}});
   if(!request||request.driverId!==driverId)throw new HttpError(404,'درخواست پیدا نشد.');
   if(payment?.method==='CASH'&&payment.status==='VERIFIED')return payment;
-  if(request.status!=='ARRIVED'||payment?.method!=='CASH_PENDING'||!payment.cashReportedAt||payment.status!=='AWAITING_PAYMENT')throw new HttpError(409,'ابتدا مشتری پرداخت در محل را اعلام کند.');
+  if(allowUnreported&&payment?.method==='FREE'&&payment.status==='VERIFIED'){
+   if(!request.driverCommissionConfirmedAt){await tx.assistanceRequest.update({where:{id:requestId},data:{driverCommissionConfirmedAt:new Date()}});await tx.outbox.create({data:{requestId}});}
+   return payment;
+  }
+  const permitted=allowUnreported?payment&&['AWAITING_TRANSFER','AWAITING_PAYMENT','REJECTED'].includes(payment.status):payment?.method==='CASH_PENDING'&&payment.cashReportedAt&&payment.status==='AWAITING_PAYMENT';
+  if(request.status!=='ARRIVED'||!permitted)throw new HttpError(409,allowUnreported?'پرداخت در این وضعیت قابل تأیید در محل نیست.':'ابتدا مشتری پرداخت در محل را اعلام کند.');
   await noPendingGateway(tx,payment.id);
-  const updated=await tx.payment.update({where:{id:payment.id},data:{status:'VERIFIED',method:'CASH',verifiedAt:new Date()}});
+  const updated=await tx.payment.update({where:{id:payment.id},data:{status:'VERIFIED',method:'CASH',cashReportedAt:payment.cashReportedAt||new Date(),verifiedAt:new Date()}});
   await tx.walletEntry.create({data:{userId:driverId,paymentId:payment.id,amountToman:-payment.commissionToman,mode:'live'}});
   await settleEarning(tx,requestId);
   await tx.assistanceRequest.update({where:{id:requestId},data:{driverCommissionConfirmedAt:new Date()}});

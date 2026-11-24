@@ -40,6 +40,13 @@ model User {
   activityDistrict String?
   services Service[]
   identityDocumentId String? @unique
+  verificationStatus String @default("PENDING")
+  verificationVersion Int @default(0)
+  verificationReviewedAt DateTime?
+  verificationReviewedBy String?
+  verificationNote String?
+  registrationNoticeSeenAt DateTime?
+  verificationNoticeSeenAt DateTime?
   identityDocument Document? @relation("Identity", fields: [identityDocumentId], references: [id])
   documents Document[] @relation("OwnedDocuments")
   supportTickets SupportTicket[]
