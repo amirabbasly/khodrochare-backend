@@ -14,7 +14,7 @@ function registerDriverReviews({app,root,prisma,config,audit,io}){
  });
  app.get(root+'/driver-verifications/:id',async(req,res)=>{
   const user=await driver(prisma,id.parse(req.params.id));
-  const documents=await prisma.document.findMany({where:{ownerId:user.id},select:{id:true,mimeType:true,createdAt:true},orderBy:{createdAt:'desc'}});
+  const documents=await prisma.document.findMany({where:{ownerId:user.id},select:require('../verification-documents').documentSelect,orderBy:{createdAt:'desc'}});
   await audit(prisma,req.operatorActor,'DRIVER_REVIEW_VIEW',user.id);res.json({user,documents});
  });
  app.get(root+'/driver-verifications/:id/documents/:documentId',async(req,res)=>{
@@ -47,10 +47,11 @@ function registerDriverReviews({app,root,prisma,config,audit,io}){
    const old=await driver(tx,userId);if(old.verificationVersion!==input.version)throw new d.HttpError(409,'وضعیت تغییر کرده است؛ دوباره باز کنید.');
    if(input.decision==='APPROVE'){
     const doc=old.identityDocumentId&&await tx.document.findFirst({where:{id:old.identityDocumentId,ownerId:userId}});
+    await require('../verification-documents').assertCompleteDocuments(tx,userId);
     if(!doc||!old.isActive)throw new d.HttpError(409,'برای تأیید، حساب باید فعال و مدرک هویتی متعلق به امدادگر ثبت شده باشد.');
    }
    const approved=input.decision==='APPROVE';
-   const updated=await tx.user.update({where:{id:userId},data:{verificationStatus:approved?'APPROVED':'NEEDS_CORRECTION',verificationVersion:{increment:1},verificationNote:input.note||null,verificationReviewedAt:new Date(),verificationReviewedBy:req.operatorActor.name,...(approved&&old.verificationStatus!=='APPROVED'?{verificationNoticeSeenAt:null}:{})},select:fields});
+   const updated=await tx.user.update({where:{id:userId},data:{verificationStatus:approved?'APPROVED':'NEEDS_CORRECTION',verificationVersion:{increment:1},verificationNote:input.note||null,verificationReviewedAt:new Date(),verificationReviewedBy:req.operatorActor.name,...(!approved?{registrationNoticeSeenAt:new Date()}:{}),...(approved&&old.verificationStatus!=='APPROVED'?{verificationNoticeSeenAt:null}:{})},select:fields});
    await audit(tx,req.operatorActor,approved?'DRIVER_APPROVE':'DRIVER_NEEDS_CORRECTION',userId,{note:input.note,version:input.version});return updated;
   });res.json(user);
  });

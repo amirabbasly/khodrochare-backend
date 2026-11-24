@@ -106,7 +106,10 @@ model Document {
   vehicleId String?
   vehicle Vehicle? @relation(fields: [vehicleId], references: [id])
   uploadTokenHash String?
+  verificationKind String?
+  vehicleEvidenceType String?
   createdAt DateTime @default(now())
+  @@unique([ownerId, verificationKind])
 }
 model Vehicle {
   id String @id @default(uuid())

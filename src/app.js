@@ -50,6 +50,7 @@ function createApp({ prisma, redis, config, io, services: s, otpSms }) {
     } catch (e) { next(e); }
   };
   require('./customer-auth').registerCustomerAuth({ app, prisma, config, services: s, auth, role, limit, io, sms: otpSms });
+  require('./verification-documents').registerVerificationDocuments({app,prisma,services:s,auth,role});
   require('./driver-verification').registerVerificationNotices({app,prisma,auth,role});
   require('./driver-auth').registerDriverAuth({ app, prisma, config, services: s, limit, io, sms: otpSms });
   require('./operator/routes').registerOperator({app,prisma,redis,config,io,limit});
@@ -122,7 +123,7 @@ function createApp({ prisma, redis, config, io, services: s, otpSms }) {
     res.status(204).end();
   });
   app.get('/api/v1/me', auth, async (req, res) => {
-    const user = await prisma.user.findUnique({ where: { id: req.user.id }, include: { vehicles: { include: { documents: { select: { id: true, mimeType: true } } } }, documents: { select: { id: true, mimeType: true } } } });
+    const user = await prisma.user.findUnique({ where: { id: req.user.id }, include: { vehicles: { include: { documents: { select: { id: true, mimeType: true } } } }, documents: { select: require('./verification-documents').documentSelect } } });
     res.json(s.safeUser(user));
   });
   app.post('/api/v1/me/vehicles', auth, role('CUSTOMER'), async (req, res) => {
@@ -138,8 +139,9 @@ function createApp({ prisma, redis, config, io, services: s, otpSms }) {
     const ref = d.documentRef.parse(req.body);
     await prisma.$transaction(async tx => {
       await tx.$queryRaw`SELECT id FROM "User" WHERE id=${req.user.id} FOR UPDATE`;
-      await s.claimDocument(tx, ref, req.user.id);
-      await tx.user.update({ where: { id: req.user.id }, data: { identityDocumentId: ref.id, ...(req.user.role==='DRIVER'?{verificationStatus:'PENDING',verificationVersion:{increment:1},verificationReviewedAt:null,verificationReviewedBy:null,verificationNoticeSeenAt:null}: {}) } });
+      if(req.user.role==='DRIVER')await require('./verification-documents').attachVerificationDocument(tx,s,req.user.id,'NATIONAL_ID',ref);
+      else await s.claimDocument(tx, ref, req.user.id);
+      await tx.user.update({ where: { id: req.user.id }, data: { identityDocumentId: ref.id, ...(req.user.role==='DRIVER'?{verificationStatus:req.user.verificationStatus==='NEEDS_CORRECTION'?'NEEDS_CORRECTION':'PENDING',verificationVersion:{increment:1},verificationNoticeSeenAt:null}: {}) } });
     });
     res.status(204).end();
   });

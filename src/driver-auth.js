@@ -4,10 +4,11 @@ const { createCustomerAuth } = require('./customer-auth');
 const { setSessionCookie, clearSessionCookie } = require('./session-cookies');
 function registerDriverAuth({ app, prisma, config, services, limit, io, sms }) {
   const service = createCustomerAuth({ prisma, config, services, sms, accountRole: 'DRIVER', registerDriver: async (tx, input) => {
-    const { password, identityDocument, ...data } = input;
+    const { password, identityDocument,birthCertificate,drivingLicense,vehicleOwnershipDocument,vehicleEvidenceType, ...data } = input;
     const user = await tx.user.create({ data: { ...data, role: 'DRIVER', passwordHash: await d.hashPassword(password), phoneVerifiedAt: new Date() } });
-    await services.claimDocument(tx, identityDocument, user.id);
-    return tx.user.update({ where: { id: user.id }, data: { identityDocumentId: identityDocument.id } });
+    const {attachVerificationDocument}=require('./verification-documents');
+    for(const [kind,reference] of [['NATIONAL_ID',identityDocument],['BIRTH_CERTIFICATE',birthCertificate],['DRIVING_LICENSE',drivingLicense],['VEHICLE_OWNERSHIP',vehicleOwnershipDocument]])await attachVerificationDocument(tx,services,user.id,kind,reference,vehicleEvidenceType);
+    return tx.user.update({ where: { id: user.id }, data: { identityDocumentId: identityDocument.id },include:{documents:{select:require('./verification-documents').documentSelect}} });
   } });
   const root = '/api/v1/auth/drivers';
   const code = { challengeId: z.string().uuid(), code: z.string().transform(d.digits).pipe(z.string().regex(/^\d{6}$/)) };
