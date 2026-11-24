@@ -22,9 +22,9 @@ test('customer signup normalizes Persian digits and requires all identity fields
   assert.equal(d.customerRegistration.safeParse({ ...input, role: 'DRIVER' }).success, false);
 });
 test('driver requires document, plate, vehicle type and at least one recognized service', () => {
-  const base = { fullName: 'امدادگر تست', phone: '09121234567', password: 'strong-password', nationalId: nationalId(), vehiclePlate: '12ب34567', vehicleType: 'نیسان', services: ['REPAIR'], identityDocument: { id: 'b771a129-21c5-4f11-93b7-32dba57fd036', token: 'a'.repeat(64) } };
+  const base = { activityCity:'تهران',activityDistrict:'منطقه ۲',fullName: 'امدادگر تست', phone: '09121234567', password: 'strong-password', nationalId: nationalId(), vehiclePlate: '12ب34567', vehicleType: 'نیسان', services: ['REPAIR'], identityDocument: { id: 'b771a129-21c5-4f11-93b7-32dba57fd036', token: 'a'.repeat(64) } };
   assert.equal(d.driverRegistration.safeParse(base).success, true);
-  for (const key of ['identityDocument', 'vehiclePlate', 'vehicleType', 'services']) {
+  for (const key of ['activityCity','identityDocument', 'vehiclePlate', 'vehicleType', 'services']) {
     const copy = { ...base }; delete copy[key];
     assert.equal(d.driverRegistration.safeParse(copy).success, false);
   }

@@ -6,7 +6,7 @@ const {pendingRequestCutoff,isPendingRequestExpired}=require('../request-expiry'
 const {listingDto,include:listingInclude}=require('../hall/service');
 const id=z.string().uuid();
 const paging=z.object({page:z.coerce.number().int().min(1).max(10000).default(1),limit:z.coerce.number().int().min(1).max(50).default(20),q:z.string().trim().max(100).default('')});
-const person={id:true,role:true,fullName:true,phone:true,nationalId:true,isActive:true,deletedAt:true,phoneVerifiedAt:true,vehiclePlate:true,vehicleType:true,services:true,createdAt:true};
+const person={id:true,role:true,fullName:true,phone:true,nationalId:true,isActive:true,deletedAt:true,phoneVerifiedAt:true,vehiclePlate:true,vehicleType:true,activityCity:true,activityDistrict:true,services:true,createdAt:true};
 const requestInclude={customer:{select:person},driver:{select:person},payment:{select:{id:true,status:true,method:true,cashReportedAt:true,serviceToman:true,partsToman:true,amountToman:true,commissionToman:true,driverShareToman:true,verifiedAt:true,checkouts:{select:{id:true,status:true,mode:true,refId:true,errorCode:true,createdAt:true,verifiedAt:true}}}}};
 const guidance='لطفاً با امدادخواه تماس بگیرید و بار را به یکی از بچه‌های امدادی بسپرید و پرداخت را به شکل آنلاین از طریق اپلیکیشن یا در محل پیگیری کنید.';
 const pageData=(q,total,items)=>({items,pagination:{page:q.page,limit:q.limit,total,totalPages:Math.max(1,Math.ceil(total/q.limit))}});

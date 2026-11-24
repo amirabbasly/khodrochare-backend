@@ -25,12 +25,7 @@ function registerMonitoring({ app, prisma, redis, config, auth, limit, geocoder,
   require('./market/routes').registerMarket({app,prisma,redis,config,auth,admin,limit});
   require('./customer-care').registerCustomerCare({app,prisma,auth,admin,limit});
   require('./hall/routes').registerHall({app,prisma,redis,config,auth,admin,limit,io,sms});
-  app.patch('/api/v1/me', auth, async (req, res) => {
-    const input = z.object({ fullName: z.string().trim().min(3).max(150) }).strict().parse(req.body);
-    const updated = await prisma.user.update({ where: { id: req.user.id }, data: input, include: { vehicles: true } });
-    const { passwordHash, ...safe } = updated;
-    res.json(safe);
-  });
+  require('./profile').registerProfile({app,prisma,config,auth,limit,io,sms});
   app.put('/api/v1/me/location', auth, limit('telemetry', 20, 60), async (req, res) => {
     const point = d.location.parse(req.body);
     const age = Date.now() - Date.parse(point.recordedAt);

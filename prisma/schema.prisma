@@ -36,6 +36,8 @@ model User {
   isActive Boolean @default(true)
   vehiclePlate String?
   vehicleType String?
+  activityCity String?
+  activityDistrict String?
   services Service[]
   identityDocumentId String? @unique
   identityDocument Document? @relation("Identity", fields: [identityDocumentId], references: [id])

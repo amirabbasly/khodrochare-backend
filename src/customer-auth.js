@@ -54,7 +54,7 @@ function createCustomerAuth({ prisma, config, services, sms = createNiazpardaz(c
       await tx.$queryRaw`SELECT id FROM "CustomerOtpChallenge" WHERE id=${input.challengeId} FOR UPDATE`;
       const challenge = await tx.customerOtpChallenge.findUnique({ where: { id: input.challengeId } });
       if (input.contact && (accountRole !== 'CUSTOMER' || challenge?.purpose !== 'HALL_CONTACT' || challenge.context !== `hall:${input.contact.userId}:${input.contact.listingId}`)) return { error: invalidCode() };
-      if (!secret || !challenge || challenge.status !== 'SENT' || challenge.expiresAt <= now() || challenge.attempts >= MAX_ATTEMPTS || (accountRole === 'DRIVER' ? !['DRIVER_REGISTER', 'DRIVER_LOGIN', 'DRIVER_RESET_PASSWORD'].includes(challenge.purpose) || (reset ? challenge.purpose !== 'DRIVER_RESET_PASSWORD' : input.registration ? challenge.purpose !== 'DRIVER_REGISTER' : challenge.purpose !== 'DRIVER_LOGIN') : input.contact ? challenge.purpose !== 'HALL_CONTACT' : deletionUserId ? challenge.purpose !== 'DELETE_ACCOUNT' : reset ? challenge.purpose !== 'RESET_PASSWORD' : !['REGISTER', 'LOGIN'].includes(challenge.purpose))) return { error: invalidCode() };
+      if (!secret || !challenge || challenge.status !== 'SENT' || challenge.expiresAt <= now() || challenge.attempts >= MAX_ATTEMPTS || (input.changePhone ? challenge.purpose !== 'PROFILE_PHONE' || challenge.context !== `profile:${input.changePhone.userId}:${input.changePhone.oldPhone}` : accountRole === 'DRIVER' ? !['DRIVER_REGISTER', 'DRIVER_LOGIN', 'DRIVER_RESET_PASSWORD'].includes(challenge.purpose) || (reset ? challenge.purpose !== 'DRIVER_RESET_PASSWORD' : input.registration ? challenge.purpose !== 'DRIVER_REGISTER' : challenge.purpose !== 'DRIVER_LOGIN') : input.contact ? challenge.purpose !== 'HALL_CONTACT' : deletionUserId ? challenge.purpose !== 'DELETE_ACCOUNT' : reset ? challenge.purpose !== 'RESET_PASSWORD' : !['REGISTER', 'LOGIN'].includes(challenge.purpose))) return { error: invalidCode() };
       let deletingUser;
       if (deletionUserId) {
         await tx.$queryRaw`SELECT id FROM "User" WHERE id=${deletionUserId} FOR UPDATE`;
@@ -69,6 +69,15 @@ function createCustomerAuth({ prisma, config, services, sms = createNiazpardaz(c
         return { error: invalidCode() }; // Commit failed-attempt counters before throwing.
       }
       await tx.customerOtpChallenge.update({ where: { id: challenge.id }, data: { status: 'USED', consumedAt: now() } });
+      if (input.changePhone) {
+        const change = input.changePhone;
+        await tx.$queryRaw`SELECT id FROM "User" WHERE id=${change.userId} FOR UPDATE`;
+        const user = await tx.user.findUnique({where:{id:change.userId}});
+        if (!user || user.deletedAt || user.isActive === false || user.phone !== change.oldPhone || user.role !== change.role) return {error:invalidCode()};
+        const updated = await tx.user.update({where:{id:user.id},data:{phone:challenge.phone,phoneVerifiedAt:now()},include:{vehicles:true}});
+        await tx.session.deleteMany({where:{userId:user.id,tokenHash:{not:change.tokenHash}}});
+        return {user:services.safeUser(updated)};
+      }
       if (input.contact) {
         await tx.$queryRaw`SELECT id FROM "HallListing" WHERE id=${input.contact.listingId} FOR UPDATE`;
         const updated = await tx.hallListing.updateMany({ where: { id: input.contact.listingId, ownerId: input.contact.userId, status: { not: 'DELETED' } }, data: { verifiedContactPhone: challenge.phone } });
