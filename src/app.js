@@ -36,6 +36,7 @@ function createApp({ prisma, redis, config, io, services: s, otpSms }) {
         if (cookieToken(req.headers.cookie, req.user.role)) setSessionCookie(res, session, config, req.get("X-Session-Persistence") !== "browser");
       } else req.user = await s.authenticate(req.token);
       if (requiresCompleteProfile(req)) return res.status(403).json({ error: 'برای استفاده از این بخش، مشخصات هویتی حساب را تکمیل کنید.', code: 'PROFILE_INCOMPLETE' });
+      if (require('./driver-verification').restrictedDriverAction(req)) throw new d.HttpError(403, require('./driver-verification').pendingMessage);
       next();
     } catch (e) { next(e); }
   };
@@ -49,6 +50,7 @@ function createApp({ prisma, redis, config, io, services: s, otpSms }) {
     } catch (e) { next(e); }
   };
   require('./customer-auth').registerCustomerAuth({ app, prisma, config, services: s, auth, role, limit, io, sms: otpSms });
+  require('./driver-verification').registerVerificationNotices({app,prisma,auth,role});
   require('./driver-auth').registerDriverAuth({ app, prisma, config, services: s, limit, io, sms: otpSms });
   require('./operator/routes').registerOperator({app,prisma,redis,config,io,limit});
   app.get('/health/live', (req, res) => res.json({ status: 'ok' }));
@@ -135,8 +137,9 @@ function createApp({ prisma, redis, config, io, services: s, otpSms }) {
   app.post('/api/v1/me/identity-document', auth, async (req, res) => {
     const ref = d.documentRef.parse(req.body);
     await prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM "User" WHERE id=${req.user.id} FOR UPDATE`;
       await s.claimDocument(tx, ref, req.user.id);
-      await tx.user.update({ where: { id: req.user.id }, data: { identityDocumentId: ref.id } });
+      await tx.user.update({ where: { id: req.user.id }, data: { identityDocumentId: ref.id, ...(req.user.role==='DRIVER'?{verificationStatus:'PENDING',verificationVersion:{increment:1},verificationReviewedAt:null,verificationReviewedBy:null,verificationNoticeSeenAt:null}: {}) } });
     });
     res.status(204).end();
   });
@@ -195,7 +198,7 @@ function createApp({ prisma, redis, config, io, services: s, otpSms }) {
       await lockRequest(tx,req.params.id);
       const request=await tx.assistanceRequest.findUnique({where:{id:req.params.id}});
       if(!request||request.driverId!==req.user.id)throw new d.HttpError(404,'Request not found');
-      if(!['REPAIR','PERIODIC_SERVICE'].includes(request.service)||request.status!=='ARRIVED'||!request.operationsStartedAt||request.partsApprovedToman==null)throw new d.HttpError(409,'Operations must start before commission confirmation');
+      if(request.status!=='ARRIVED'||(['REPAIR','PERIODIC_SERVICE'].includes(request.service)&&(!request.operationsStartedAt||request.partsApprovedToman==null)))throw new d.HttpError(409,'Operations must start before commission confirmation');
       const payment=await tx.payment.findUnique({where:{requestId:request.id}});
       const paid=payment?.status==='VERIFIED'||config.ZARINPAL_MODE!=='live'&&payment?.status==='SANDBOX_VERIFIED';
       if(!paid){
@@ -230,7 +233,7 @@ function createApp({ prisma, redis, config, io, services: s, otpSms }) {
     res.json(rows.map(row => isPendingRequestExpired(row, now) ? { ...row, status: 'EXPIRED' } : row));
   });
   app.get('/api/v1/drivers/requests/available', auth, role('DRIVER'), async (req, res) => {
-    if(await require('./driver-balance').driverBalance(prisma,req.user.id)<0)return res.json([]);
+
     const requests = await prisma.assistanceRequest.findMany({ where: { status: 'PENDING', driverId: null, operatorConfirmedAt: null, createdAt: { gt: pendingRequestCutoff() }, service: { in: req.user.services } }, select: { customer: { select: { fullName: true } }, id: true, service: true, vehicleName: true, originLat: true, originLng: true, originAddress: true, destinationAddress: true, destinationLat: true, destinationLng: true, distanceMeters: true, priceToman: true, pricingBreakdown: true, createdAt: true }, orderBy: { createdAt: 'desc' }, take: 50 });
     res.json(requests);
   });
@@ -244,6 +247,7 @@ function createApp({ prisma, redis, config, io, services: s, otpSms }) {
     const request = await prisma.$transaction(async tx => {
       // Serialize acceptance per driver; conditional update prevents two drivers accepting one request.
       await tx.$queryRaw`SELECT id FROM "User" WHERE id=${req.user.id} FOR UPDATE`;
+      require('./driver-verification').assertVerifiedDriver(await tx.user.findUnique({where:{id:req.user.id}}));
       await require('./driver-balance').assertDriverCredit(tx,req.user.id);
       const loc = await tx.driverLocation.findUnique({ where: { driverId: req.user.id } });
       if (!loc || Date.now() - loc.recordedAt.getTime() > config.LOCATION_MAX_AGE_SECONDS * 1000) throw new d.HttpError(409, 'Send a fresh GPS location before accepting');

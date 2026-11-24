@@ -68,6 +68,7 @@ model User {
   hallSales HallConversation[] @relation("HallSeller")
   hallMessages HallMessage[]
   createdAt DateTime @default(now())
+  @@index([role, verificationStatus, createdAt])
   @@unique([role, phone])
   @@unique([role, nationalId])
 }

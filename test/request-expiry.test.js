@@ -61,13 +61,13 @@ test('available HTTP filters elapsed requests and acceptance rechecks the deadli
   const fresh = { ...old, id: 'fresh', createdAt: new Date() };
   const extra=['MOBILE_CARWASH','PERIODIC_SERVICE','INSPECTION'].map(service=>({...fresh,id:service,service}));
   const requests = [old, fresh,...extra]; const events = [];let balance=0;
-  const prisma = { walletEntry:{aggregate:async()=>({_sum:{amountToman:balance}})},driverEarning:{aggregate:async()=>({_sum:{amountToman:0}})},assistanceRequest: {
+  const prisma = { user:{findUnique:async()=>({role:'DRIVER',verificationStatus:'APPROVED'})},walletEntry:{aggregate:async()=>({_sum:{amountToman:balance}})},driverEarning:{aggregate:async()=>({_sum:{amountToman:0}})},assistanceRequest: {
     findMany: async ({ where }) => where.customerId ? requests : requests.filter(r => r.status === where.status && r.driverId === where.driverId && r.createdAt > where.createdAt.gt && where.service.in.includes(r.service)),
     count: async () => 0,
     updateMany: async ({ where, data }) => { assert.ok(where.createdAt.gt instanceof Date); const r = requests.find(r => r.id === where.id && r.status === where.status && !r.driverId && where.service.in.includes(r.service) && r.createdAt > where.createdAt.gt); if (!r) return { count: 0 }; Object.assign(r, data); return { count: 1 }; },
     findUnique: async ({ where }) => requests.find(r => r.id === where.id),
   }, userLocation:{findUnique:async()=>null},operatorAudit:{create:async()=>({})},driverLocation: { findUnique: async () => ({ recordedAt: new Date() }) }, outbox: { create: async ({ data }) => events.push(data) }, $queryRaw: async () => [], $transaction: callback => callback(prisma) };
-  const app = createApp({ prisma, redis: { eval: async () => 1 }, io: {}, config: { TRUST_PROXY: 0, origins: [], UPLOAD_DIR: './uploads', LOCATION_MAX_AGE_SECONDS: 120 }, services: { authenticate: async token => ({ id: token, role: token === 'customer' ? 'CUSTOMER' : 'DRIVER', activityCity:'مشهد',activityDistrict:'بخش مرکزی',services: [token.startsWith('service:')?token.slice(8):'REPAIR'] }) } });
+  const app = createApp({ prisma, redis: { eval: async () => 1 }, io: {}, config: { TRUST_PROXY: 0, origins: [], UPLOAD_DIR: './uploads', LOCATION_MAX_AGE_SECONDS: 120 }, services: { authenticate: async token => ({ id: token, role: token === 'customer' ? 'CUSTOMER' : 'DRIVER', verificationStatus:'APPROVED', activityCity:'مشهد',activityDistrict:'بخش مرکزی',services: [token.startsWith('service:')?token.slice(8):'REPAIR'] }) } });
   const server = app.listen(0, '127.0.0.1'); await new Promise(resolve => server.once('listening', resolve));
   const call = (url, token = 'driver', method = 'GET') => fetch(`http://127.0.0.1:${server.address().port}/api/v1${url}`, { method, headers: { authorization: `Bearer ${token}` } });
   try {
@@ -78,7 +78,7 @@ test('available HTTP filters elapsed requests and acceptance rechecks the deadli
     const response = await call('/requests/fresh/accept', 'driver', 'POST'); assert.equal(response.status, 200); assert.equal((await response.json()).status, 'ACCEPTED');
     assert.equal(events.length, 1);
     for(const row of extra){assert.deepEqual((await(await call('/drivers/requests/available','service:'+row.service)).json()).map(r=>r.id),[row.id]);assert.equal((await call('/requests/'+row.id+'/accept','driver','POST')).status,409);}
-    balance=-1;assert.deepEqual(await(await call('/drivers/requests/available','service:MOBILE_CARWASH')).json(),[]);
+    balance=-1;assert.deepEqual((await(await call('/drivers/requests/available','service:MOBILE_CARWASH')).json()).map(row=>row.id),['MOBILE_CARWASH']);
     const blocked=await call('/requests/MOBILE_CARWASH/accept','service:MOBILE_CARWASH','POST');assert.equal(blocked.status,409);assert.match((await blocked.json()).error,/کمیسیون/);
     balance=0;assert.equal((await call('/requests/MOBILE_CARWASH/accept','service:MOBILE_CARWASH','POST')).status,200);
 

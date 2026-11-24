@@ -13,7 +13,12 @@ function registerProfile({app,prisma,config,auth,limit,io,sms}) {
   const otp = createCustomerAuth({prisma,config,services,sms});
   app.patch('/api/v1/me',auth,async(req,res)=>{
     const input=profileInput(req.user.role,req.body);
-    const user=await prisma.user.update({where:{id:req.user.id},data:input,include:{vehicles:true}});
+    const user=await prisma.$transaction(async tx=>{
+      await tx.$queryRaw`SELECT id FROM "User" WHERE id=${req.user.id} FOR UPDATE`;
+      const old=await tx.user.findUnique({where:{id:req.user.id}});
+      const identityChanged=req.user.role==='DRIVER'&&((input.fullName!==undefined&&input.fullName!==old.fullName)||(input.nationalId!==undefined&&input.nationalId!==old.nationalId));
+      return tx.user.update({where:{id:req.user.id},data:{...input,...(req.user.role==='DRIVER'?{verificationVersion:{increment:1}}:{}),...(identityChanged?{verificationStatus:'PENDING',verificationReviewedAt:null,verificationReviewedBy:null,verificationNoticeSeenAt:null}: {})},include:{vehicles:true}});
+    });
     res.set('Cache-Control','no-store').json(services.safeUser(user));
   });
   app.post('/api/v1/me/phone/otp',auth,limit('profile-phone-send',10,3600),async(req,res)=>{

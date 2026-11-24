@@ -6,7 +6,7 @@ const {pendingRequestCutoff,isPendingRequestExpired}=require('../request-expiry'
 const {listingDto,include:listingInclude}=require('../hall/service');
 const id=z.string().uuid();
 const paging=z.object({page:z.coerce.number().int().min(1).max(10000).default(1),limit:z.coerce.number().int().min(1).max(50).default(20),q:z.string().trim().max(100).default('')});
-const person={id:true,role:true,fullName:true,phone:true,nationalId:true,isActive:true,deletedAt:true,phoneVerifiedAt:true,vehiclePlate:true,vehicleType:true,activityCity:true,activityDistrict:true,services:true,createdAt:true};
+const person={id:true,role:true,fullName:true,phone:true,nationalId:true,isActive:true,deletedAt:true,phoneVerifiedAt:true,vehiclePlate:true,vehicleType:true,activityCity:true,activityDistrict:true,verificationStatus:true,verificationVersion:true,services:true,createdAt:true};
 const requestInclude={customer:{select:person},driver:{select:person},payment:{select:{id:true,status:true,method:true,cashReportedAt:true,serviceToman:true,partsToman:true,amountToman:true,commissionToman:true,driverShareToman:true,verifiedAt:true,checkouts:{select:{id:true,status:true,mode:true,refId:true,errorCode:true,createdAt:true,verifiedAt:true}}}}};
 const guidance='لطفاً با امدادخواه تماس بگیرید و بار را به یکی از بچه‌های امدادی بسپرید و پرداخت را به شکل آنلاین از طریق اپلیکیشن یا در محل پیگیری کنید.';
 const pageData=(q,total,items)=>({items,pagination:{page:q.page,limit:q.limit,total,totalPages:Math.max(1,Math.ceil(total/q.limit))}});
@@ -14,6 +14,7 @@ function registerOperator({app,prisma,redis,config,io,limit}){
  const root='/api/v1/operator';
  app.use(root,operatorAuth(config,redis),limit('operator-panel',180,60),(_req,res,next)=>{res.set('Cache-Control','no-store');next();});
  const audit=(tx,actor,action,targetId,details={})=>tx.operatorAudit.create({data:{id:randomUUID(),actorId:actor.id,actorRole:actor.role,actorName:actor.name,action,targetId,details}});
+ require('./driver-verification').registerDriverReviews({app,root,prisma,config,audit,io});
  require('./locations').registerRequestLocations({app,root,prisma,config,id});
  app.get(root+'/requests',async(req,res)=>{
   const q=paging.extend({status:z.enum(['ALL','PENDING','OPERATOR','ACCEPTED','ARRIVED','COMPLETED','CANCELLED','EXPIRED']).default('ALL')}).parse(req.query);
@@ -45,6 +46,7 @@ function registerOperator({app,prisma,redis,config,io,limit}){
    const [old,driver]=await Promise.all([tx.assistanceRequest.findUnique({where:{id:requestId}}),tx.user.findUnique({where:{id:input.driverId}})]);
    if(!old||!driver)throw new HttpError(404,'درخواست یا امدادگر پیدا نشد.');
    if(old.status!=='PENDING'||old.driverId||!old.operatorConfirmedAt)throw new HttpError(409,'ابتدا درخواست معلق را تأیید کنید؛ درخواست تخصیص‌یافته قابل واگذاری مجدد نیست.');
+   if(driver.verificationStatus!=='APPROVED')throw new HttpError(409,require('../driver-verification').pendingMessage);
    await require('../driver-balance').assertDriverCredit(tx,driver.id);
    if(driver.role!=='DRIVER'||!driver.isActive||driver.deletedAt||!driver.services.includes(old.service))throw new HttpError(409,'این امدادگر فعال نیست یا خدمت موردنیاز را ارائه نمی‌کند.');
    if(await tx.assistanceRequest.findFirst({where:{driverId:driver.id,status:{in:['ACCEPTED','ARRIVED']}},select:{id:true}}))throw new HttpError(409,'این امدادگر مأموریت فعال دیگری دارد.');

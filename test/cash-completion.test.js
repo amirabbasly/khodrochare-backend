@@ -32,7 +32,7 @@ test('all five services complete after driver cash receipt, including legacy tic
   for(const service of services){
    const repair=['REPAIR','PERIODIC_SERVICE'].includes(service),request=await job(service,{driverCommissionConfirmedAt:repair?new Date():null});
    assert.equal((await call(request.id,'/status',{status:'COMPLETED'},'driver','PATCH')).status,409);
-   const route=repair?'/commission-confirm':'/payment/cash/confirm';
+   const route='/commission-confirm';
    assert.equal((await call(request.id,route,undefined,'other')).status,404);
    assert.equal(await prisma.payment.count({where:{requestId:request.id}}),0);
    const result=await call(request.id,route);assert.equal(result.status,200,JSON.stringify(result.data));

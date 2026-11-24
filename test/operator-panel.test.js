@@ -38,7 +38,7 @@ test('real migration/Prisma/HTTP: signed operator actions, safe dispatch, user c
   await tcp.start();prisma=new PrismaClient({datasources:{db:{url:`postgresql://postgres:postgres@${tcp.getServerConn()}/postgres?schema=public&connection_limit=1&sslmode=disable`}},transactionOptions:{timeout:20000}});
   const passwordHash=await hashPassword('oldPassword123');
   const customer=await prisma.user.create({data:{role:'CUSTOMER',fullName:'مشتری آزمایشی',phone:'09121234567',passwordHash,nationalId:'1234567891',services:[]}});
-  const driver=await prisma.user.create({data:{role:'DRIVER',fullName:'امدادگر آزمایشی',phone:'09121234568',passwordHash,nationalId:'9876543210',services:['REPAIR'],vehicleType:'نیسان'}});
+  const driver=await prisma.user.create({data:{role:'DRIVER',verificationStatus:'APPROVED',fullName:'امدادگر آزمایشی',phone:'09121234568',passwordHash,nationalId:'9876543210',services:['REPAIR'],vehicleType:'نیسان'}});
   const job=await prisma.assistanceRequest.create({data:{customerId:customer.id,service:'REPAIR',vehicleName:'پژو ۲۰۷',vehiclePlate:'12 ب 345',originLat:35.7,originLng:51.4,priceToman:800000}});
   await prisma.userLocation.create({data:{userId:customer.id,latitude:35.701234,longitude:51.401234,province:'تهران',recordedAt:new Date()}});
   await prisma.driverLocation.create({data:{driverId:driver.id,latitude:35.711234,longitude:51.411234,recordedAt:new Date(Date.now()-180000)}});
