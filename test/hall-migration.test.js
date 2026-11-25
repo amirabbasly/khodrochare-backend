@@ -20,6 +20,7 @@ test('actual Hall migrations and Prisma HTTP deletion reproduce the old CHECK fa
     // created from the exact deployed migrations, not copies or JavaScript mocks.
     await db.exec(`CREATE TABLE "User" (id TEXT PRIMARY KEY, "fullName" TEXT NOT NULL DEFAULT 'Fixture user', phone TEXT DEFAULT '09901234567')`);
     await db.exec(await migration('202611180003_car_hall'));
+    await db.exec(await migration('202611240008_hall_publication_intent'));
     await db.exec(await migration('202611190001_hall_chat'));
     await db.exec(`ALTER TABLE "HallListing" ADD COLUMN "verifiedContactPhone" TEXT, ADD COLUMN "submittedAt" TIMESTAMP(3), ADD COLUMN "reviewedAt" TIMESTAMP(3), ADD COLUMN "reviewedBy" TEXT, ADD COLUMN "moderationNote" TEXT;
       ALTER TABLE "HallPlan" ADD COLUMN "originalPriceToman" INTEGER`);

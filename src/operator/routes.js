@@ -108,7 +108,7 @@ function registerOperator({app,prisma,redis,config,io,limit}){
  });
  app.get(root+'/listings',async(req,res)=>{
   const q=paging.extend({status:z.enum(['ALL','PENDING_REVIEW','PUBLISHED','REJECTED','DRAFT','BLOCKED','SOLD']).default('PENDING_REVIEW')}).parse(req.query);
-  const where={status:q.status==='ALL'?{not:'DELETED'}:q.status,...(q.q?{OR:[{searchText:{contains:q.q,mode:'insensitive'}},{owner:{phone:{contains:q.q}}},{owner:{fullName:{contains:q.q,mode:'insensitive'}}}]}:{})};
+  const where={AND:[{status:{notIn:['DELETED','DRAFT']}},{status:q.status==='ALL'?{not:'DELETED'}:q.status}],...(q.q?{OR:[{searchText:{contains:q.q,mode:'insensitive'}},{owner:{phone:{contains:q.q}}},{owner:{fullName:{contains:q.q,mode:'insensitive'}}}]}:{})};
   const [total,rows]=await Promise.all([prisma.hallListing.count({where}),prisma.hallListing.findMany({where,include:{...listingInclude,owner:{select:person}},orderBy:[{updatedAt:'desc'},{id:'desc'}],take:q.limit,skip:(q.page-1)*q.limit})]);
   res.json(pageData(q,total,rows.map(row=>({...listingDto(row,true),owner:row.owner}))));
  });
@@ -140,11 +140,12 @@ function registerOperator({app,prisma,redis,config,io,limit}){
    const now=new Date(),approved=input.decision==='APPROVE';
    const boosts={};
    if(approved){
-    const waiting=await tx.hallOrder.findMany({where:{listingId,status:'VERIFIED',activatedAt:null,action:'UPGRADE',errorCode:'AWAITING_MODERATION'}});
+    const waiting=await tx.hallOrder.findMany({where:{listingId,status:'VERIFIED',activatedAt:null,errorCode:'AWAITING_MODERATION'}});
     for(const order of waiting){
-     const field={LADDER:'ladderUntil',URGENT:'urgentUntil',FEATURED:'featuredUntil'}[order.planCode];
-     if(!field)continue;
-     boosts[field]=new Date(now.getTime()+order.snapshot.durationHours*3600000);
+     for(const plan of require('../hall/order-plans').orderPlans(order)){
+      const field=require('../hall/order-plans').boostFields[plan.code];
+      if(field)boosts[field]=new Date(now.getTime()+plan.durationHours*3600000);
+     }
      await tx.hallOrder.update({where:{id:order.id},data:{activatedAt:now,errorCode:null}});
     }
    }

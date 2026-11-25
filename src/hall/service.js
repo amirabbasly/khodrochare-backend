@@ -1,3 +1,4 @@
+const {orderPlans,boostFields}=require('./order-plans');
 const {HttpError}=require('../domain');
 const {publicLocation}=require('./location');
 const {createZarinpal}=require('../zarinpal');
@@ -10,7 +11,7 @@ function listingDto(row,owned=false){
     fuelType:draft.fuelType,gearboxType:draft.gearboxType,chassisCondition:draft.chassisCondition,gearboxCondition:draft.gearboxCondition,location:owned?draft.location:publicLocation(draft.location),
     description:row.status==='PUBLISHED'||owned?draft.description:undefined,color:draft.color,
     photos:(photos||[]).map(p=>({id:p.id,url:`/hall/photos/${p.id}`+(owned?`?token=${p.readToken}`:'')})),
-    services:(orders||[]).filter(o=>o.activatedAt&&new Date(o.activatedAt.getTime()+o.snapshot.durationHours*3600000)>new Date()).map(o=>({name:o.snapshot.name,code:o.planCode,until:new Date(o.activatedAt.getTime()+o.snapshot.durationHours*3600000),mode:o.mode})),
+    services:(orders||[]).filter(o=>o.activatedAt&&new Date(o.activatedAt.getTime()+o.snapshot.durationHours*3600000)>new Date()).flatMap(o=>orderPlans(o).map(p=>({name:p.name,code:p.code,until:new Date(o.activatedAt.getTime()+p.durationHours*3600000),mode:o.mode}))),
   };
 }
 function createHall(prisma,config,provider=createZarinpal({...config,ZARINPAL_MODE:'sandbox'})){
@@ -63,12 +64,18 @@ function createHall(prisma,config,provider=createZarinpal({...config,ZARINPAL_MO
     const owner=await tx.user.findUnique({where:{id:row.ownerId},select:{phone:true}});
     if(data.contactPhone!==owner?.phone&&data.contactPhone!==row.verifiedContactPhone)throw new HttpError(409,'ابتدا شماره تماس جایگزین آگهی را با کد تأیید کنید.');
   }
-  async function freePublish(id,userId){await ready();return prisma.$transaction(async tx=>{
+  async function freePublish(id,userId,planCodes=[]){await ready();return prisma.$transaction(async tx=>{
     await lock(tx,id);const row=await owned(id,userId,tx);
     if(['PUBLISHED','PENDING_REVIEW'].includes(row.status))return listingDto(row,true);
     await editable(tx,row);await validatePublish(tx,row);
+    if(planCodes.length){
+      const requestedBoosts=[...new Set(planCodes)].sort();
+      const plans=await tx.hallPlan.findMany({where:{code:{in:requestedBoosts},active:true,kind:'BOOST'}});
+      if(plans.length!==requestedBoosts.length)throw new HttpError(400,'خدمات انتخاب‌شده معتبر نیست.');
+      return listingDto(await tx.hallListing.update({where:{id},data:{status:'DRAFT',requestedBoosts,submittedAt:null,version:{increment:1}},include}),true);
+    }
     const plan=await tx.hallPlan.findUnique({where:{code:'FREE'}});if(!plan?.active||plan.priceToman!==0)throw new HttpError(409,'انتشار رایگان موقتاً در دسترس نیست.');
-    return listingDto(await tx.hallListing.update({where:{id},data:{status:'PENDING_REVIEW',submittedAt:new Date(),reviewedAt:null,reviewedBy:null,moderationNote:null,version:{increment:1}},include}),true);
+    return listingDto(await tx.hallListing.update({where:{id},data:{status:'PENDING_REVIEW',requestedBoosts:[],submittedAt:new Date(),reviewedAt:null,reviewedBy:null,moderationNote:null,version:{increment:1}},include}),true);
   });}
   async function estimate(data,userId){
     const current=data.year<1800?Number(new Intl.DateTimeFormat('en-US-u-ca-persian',{year:'numeric'}).formatToParts(new Date()).find(p=>p.type==='year')?.value):new Date().getUTCFullYear();
@@ -78,18 +85,22 @@ function createHall(prisma,config,provider=createZarinpal({...config,ZARINPAL_MO
   }
   const orderDto=o=>({id:o.id,listingId:o.listingId,status:o.status,mode:o.mode,amountToman:o.amountToman,refId:o.refId,planName:o.snapshot.name,paymentMethod:o.refId?.startsWith('WALLET-')?'WALLET':'GATEWAY',errorCode:o.errorCode,url:o.status==='PENDING'?provider.redirect(o.authority,o.mode):null});
   async function checkout(user,id,input){
-    await ready();const usingWallet=input.method==='WALLET';
+    await ready();const usingWallet=input.method==='WALLET',codes=[...new Set(input.planCodes||[input.planCode])].sort(),planCode=codes.join('+');
     const order=await prisma.$transaction(async tx=>{
       if(usingWallet)await tx.$queryRaw`SELECT id FROM "User" WHERE id=${user.id} FOR UPDATE`;
       await lock(tx,id);const row=await owned(id,user.id,tx);
       const existing=await tx.hallOrder.findUnique({where:{userId_idempotencyKey:{userId:user.id,idempotencyKey:input.idempotencyKey}}});
-      if(existing){if(existing.listingId!==id||existing.planCode!==input.planCode||!!existing.refId?.startsWith('WALLET-')!==usingWallet)throw new HttpError(409,'شناسه پرداخت تکراری است.');return existing;}
+      if(existing){if(existing.listingId!==id||existing.planCode!==planCode||!!existing.refId?.startsWith('WALLET-')!==usingWallet)throw new HttpError(409,'شناسه پرداخت تکراری است.');return existing;}
       const action=['PUBLISHED','PENDING_REVIEW'].includes(row.status)?'UPGRADE':'PUBLISH';
       if(!['DRAFT','PUBLISHED','PENDING_REVIEW','REJECTED'].includes(row.status))throw new HttpError(409,'آگهی در وضعیت قابل انتشار نیست.');
       await validatePublish(tx,row);
-      const plan=await tx.hallPlan.findUnique({where:{code:input.planCode}});
-      if(plan?.code==='URGENT')throw new HttpError(400,'خدمت فوری دیگر ارائه نمی‌شود.');
-      if(!plan?.active||plan.priceToman<=0||plan.kind!==(action==='PUBLISH'?'PLAN':'BOOST'))throw new HttpError(400,'طرح انتخاب‌شده معتبر نیست.');
+      const plans=[];
+      for(const code of codes){const plan=await tx.hallPlan.findUnique({where:{code}});if(!plan?.active||plan.code==='URGENT'||plan.priceToman<=0)throw new HttpError(400,'خدمات انتخاب‌شده معتبر نیست.');plans.push(plan);}
+      const draftBoost=row.status==='DRAFT'&&codes.every(code=>['LADDER','FEATURED'].includes(code));
+      if(draftBoost&&JSON.stringify([...(row.requestedBoosts||[])].sort())!==JSON.stringify(codes))throw new HttpError(409,'ابتدا آگهی و خدمات انتخاب‌شده را برای انتشار تأیید کنید.');
+      if(plans.some(p=>p.kind!==(action==='PUBLISH'&&!draftBoost?'PLAN':'BOOST')))throw new HttpError(400,'طرح انتخاب‌شده معتبر نیست.');
+      const plan=plans.length===1?plans[0]:{code:planCode,name:plans.map(p=>p.name).join(' + '),priceToman:plans.reduce((sum,p)=>sum+p.priceToman,0),durationHours:Math.max(...plans.map(p=>p.durationHours)),plans};
+      if(plan.priceToman>100000000)throw new HttpError(400,'مبلغ خدمات معتبر نیست.');
       if(plan.code==='EXPRESS48'&&!expressEligible(row.draft))throw new HttpError(400,'این خودرو شرایط طرح ۴۸ ساعته را ندارد.');
       const pending=await tx.hallOrder.findFirst({where:{listingId:id,status:{in:['CREATING','PENDING']}}});
       if(pending){
@@ -97,10 +108,8 @@ function createHall(prisma,config,provider=createZarinpal({...config,ZARINPAL_MO
         else if(!usingWallet&&pending.planCode===plan.code)return pending;
         else throw new HttpError(409,'یک پرداخت دیگر در جریان است.');
       }
-      if(action==='UPGRADE'){
-        const last=await tx.hallOrder.findFirst({where:{listingId:id,planCode:plan.code,status:'VERIFIED'},orderBy:{activatedAt:'desc'}});
-        if(last&&(!last.activatedAt||new Date(last.activatedAt.getTime()+last.snapshot.durationHours*3600000)>new Date()))throw new HttpError(409,'این خدمت خریداری شده یا هنوز فعال است.');
-      }
+      const bought=await tx.hallOrder.findMany({where:{listingId:id,status:'VERIFIED'}});
+      if(bought.some(o=>orderPlans(o).some(p=>codes.includes(p.code)&&(!o.activatedAt||new Date(o.activatedAt.getTime()+p.durationHours*3600000)>new Date()))))throw new HttpError(409,'این خدمت خریداری شده یا هنوز فعال است.');
       const created=await tx.hallOrder.create({data:{userId:user.id,listingId:id,listingVersion:row.version,action,planCode:plan.code,snapshot:JSON.parse(JSON.stringify(plan)),amountToman:plan.priceToman,mode:usingWallet?'live':provider.mode,idempotencyKey:input.idempotencyKey,...(usingWallet?{refId:'WALLET-'+input.idempotencyKey}:{})}});
       if(usingWallet){await require('../wallet-spending').spendWallet(tx,user.id,{hallOrderId:created.id,amountToman:created.amountToman});return activate(tx,created,row);}
       return created;
@@ -116,8 +125,15 @@ function createHall(prisma,config,provider=createZarinpal({...config,ZARINPAL_MO
     }catch(error){await prisma.hallOrder.updateMany({where:{id:order.id,status:'CREATING'},data:{status:'FAILED',errorCode:'GATEWAY_REQUEST_FAILED'}});throw error;}
   }
   async function activate(tx,order,row){
-    const boostField=order.planCode==='LADDER'?'ladderUntil':order.planCode==='URGENT'?'urgentUntil':order.planCode==='FEATURED'?'featuredUntil':null;
-    if(row.status==='PENDING_REVIEW'&&order.action==='UPGRADE'&&boostField&&row.version===order.listingVersion)return tx.hallOrder.update({where:{id:order.id},data:{status:'VERIFIED',verifiedAt:new Date(),activatedAt:null,errorCode:'AWAITING_MODERATION'}});
+    const selected=orderPlans(order),boostField=boostFields[order.planCode];
+    const allBoosts=selected.every(p=>boostFields[p.code]);
+    if(allBoosts&&row.version===order.listingVersion&&['DRAFT','PENDING_REVIEW'].includes(row.status)){
+      if(row.status==='DRAFT'){
+        if(JSON.stringify([...(row.requestedBoosts||[])].sort())!==JSON.stringify(selected.map(p=>p.code).sort()))return tx.hallOrder.update({where:{id:order.id},data:{status:'REVIEW_REQUIRED',errorCode:'LISTING_CHANGED',verifiedAt:new Date()}});
+        await tx.hallListing.update({where:{id:row.id},data:{status:'PENDING_REVIEW',submittedAt:new Date(),reviewedAt:null,reviewedBy:null,moderationNote:null,version:{increment:1}}});
+      }
+      return tx.hallOrder.update({where:{id:order.id},data:{status:'VERIFIED',verifiedAt:new Date(),activatedAt:null,errorCode:'AWAITING_MODERATION'}});
+    }
     if(['BLOCKED','REJECTED','DELETED','PENDING_REVIEW'].includes(row.status)||row.version!==order.listingVersion||order.action==='PUBLISH'&&row.status!=='DRAFT'||order.action==='UPGRADE'&&(row.status!=='PUBLISHED'||boostField&&row[boostField]>new Date()))return tx.hallOrder.update({where:{id:order.id},data:{status:'REVIEW_REQUIRED',errorCode:'LISTING_CHANGED',verifiedAt:new Date()}});
     if(order.action==='PUBLISH'){
       await tx.hallListing.update({where:{id:row.id},data:{status:'PENDING_REVIEW',submittedAt:new Date(),moderationNote:null}});
@@ -125,6 +141,7 @@ function createHall(prisma,config,provider=createZarinpal({...config,ZARINPAL_MO
     }
     const now=new Date(),until=new Date(Date.now()+order.snapshot.durationHours*3600000);
     const data=order.action==='PUBLISH'?{status:'PUBLISHED',publishedAt:now,bumpedAt:now}:{};
+    if(allBoosts){for(const p of selected){if(row[boostFields[p.code]]>now)return tx.hallOrder.update({where:{id:order.id},data:{status:'REVIEW_REQUIRED',errorCode:'LISTING_CHANGED',verifiedAt:now}});data[boostFields[p.code]]=new Date(now.getTime()+p.durationHours*3600000);if(p.code==='LADDER')data.bumpedAt=now;}}
     if(['EXPRESS48','FEATURED'].includes(order.planCode))data.featuredUntil=until;
     if(order.planCode==='URGENT')data.urgentUntil=until;
     if(order.planCode==='LADDER'){data.ladderUntil=until;data.bumpedAt=now;}

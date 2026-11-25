@@ -21,7 +21,7 @@ test('48-hour priority requires healthy condition, recent year and bounded milea
 function database(){
  const plans=new Map(),orders=[],row={id:randomUUID(),ownerId:'owner',version:2,status:'DRAFT',draft:{...full},priceToman:3500000000n,photos:[{id:randomUUID(),readToken:'secret',url:'',position:0}],orders:[]};let requests=0,verifications=0,activations=0;
  const match=(r,w)=>Object.entries(w).every(([k,v])=>k==='userId_idempotencyKey'?r.userId===v.userId&&r.idempotencyKey===v.idempotencyKey:v&&typeof v==='object'?'in'in v?v.in.includes(r[k]):'lt'in v?r[k]<v.lt:true:r[k]===v);
- const tx={$queryRaw:async()=>[],user:{findUnique:async()=>({phone:full.contactPhone})},hallPlan:{upsert:async({where,create})=>{if(!plans.has(where.code))plans.set(where.code,create);},findUnique:async({where})=>plans.get(where.code),updateMany:async()=>({count:0})},hallBanner:{},hallListing:{findFirst:async({where})=>match(row,where)?{...row}:null,findUnique:async()=>({...row}),update:async({data})=>{if(data.status==='PUBLISHED')activations++;const{version,...rest}=data;Object.assign(row,rest);if(version)row.version+=version.increment;return{...row};}},hallOrder:{findUnique:async({where})=>orders.find(r=>match(r,where)),findFirst:async({where})=>orders.find(r=>match(r,where)),create:async({data})=>{const r={id:randomUUID(),status:'CREATING',errorCode:null,createdAt:new Date(),...data};orders.push(r);return{...r};},update:async({where,data})=>Object.assign(orders.find(r=>match(r,where)),data),updateMany:async({where,data})=>{const found=orders.filter(r=>match(r,where));found.forEach(r=>Object.assign(r,data));return{count:found.length};}}};
+ const tx={$queryRaw:async()=>[],user:{findUnique:async()=>({phone:full.contactPhone})},hallPlan:{findMany:async({where})=>[...plans.values()].filter(r=>match(r,where)),upsert:async({where,create})=>{if(!plans.has(where.code))plans.set(where.code,create);},findUnique:async({where})=>plans.get(where.code),updateMany:async()=>({count:0})},hallBanner:{},hallListing:{findFirst:async({where})=>match(row,where)?{...row}:null,findUnique:async()=>({...row}),update:async({data})=>{if(data.status==='PUBLISHED')activations++;const{version,...rest}=data;Object.assign(row,rest);if(version)row.version+=version.increment;return{...row};}},hallOrder:{findMany:async({where})=>orders.filter(r=>match(r,where)),findUnique:async({where})=>orders.find(r=>match(r,where)),findFirst:async({where})=>orders.find(r=>match(r,where)),create:async({data})=>{const r={id:randomUUID(),status:'CREATING',errorCode:null,createdAt:new Date(),...data};orders.push(r);return{...r};},update:async({where,data})=>Object.assign(orders.find(r=>match(r,where)),data),updateMany:async({where,data})=>{const found=orders.filter(r=>match(r,where));found.forEach(r=>Object.assign(r,data));return{count:found.length};}}};
  const provider={mode:'sandbox',request:async()=>{requests++;return{authority:'S'+'1'.repeat(35)};},verify:async()=>{verifications++;return{refId:'123456'};},redirect:()=> 'https://sandbox.zarinpal.com/pg/StartPay/test'};
  const prisma={...tx,$transaction:fn=>fn(tx)},service=createHall(prisma,{},provider);
  return{service,row,orders,plans,provider,counts:()=>({requests,verifications,activations})};
@@ -39,6 +39,17 @@ test('paid Hall publication uses server fee, stays private until verified and ac
  const paid=await db.service.verify(order.id,db.orders[0].authority,'OK');assert.equal(paid.status,'REVIEW_REQUIRED');assert.equal(db.row.status,'PENDING_REVIEW');
  await db.service.verify(order.id,db.orders[0].authority,'OK');assert.equal(db.counts().activations,0);assert.equal(db.counts().verifications,1);
 });
+
+test('selected ladder and featured are one gateway payment and stay draft until verified',async()=>{
+ const db=database(),codes=['FEATURED','LADDER'];
+ const intent=await db.service.freePublish(db.row.id,'owner',codes);assert.equal(intent.status,'DRAFT');assert.deepEqual(db.row.requestedBoosts,codes);
+ const failed=await db.service.checkout({id:'owner'},db.row.id,{planCodes:codes,idempotencyKey:randomUUID()});
+ assert.equal(failed.amountToman,298000);assert.equal(db.counts().requests,1);assert.equal(db.row.status,'DRAFT');
+ await db.service.verify(failed.id,db.orders[0].authority,'NOK');assert.equal(db.row.status,'DRAFT');
+ const order=await db.service.checkout({id:'owner'},db.row.id,{planCodes:codes,idempotencyKey:randomUUID()});assert.equal(order.amountToman,298000);
+ await db.service.verify(order.id,db.orders[1].authority,'OK');assert.equal(db.row.status,'PENDING_REVIEW');assert.equal(db.orders[1].errorCode,'AWAITING_MODERATION');
+ await db.service.verify(order.id,db.orders[1].authority,'OK');assert.equal(db.counts().verifications,1);assert.equal(db.counts().activations,0);
+});
 test('failed and cancelled payments retain drafts; a changed listing after late verification needs review',async()=>{
  const db=database(),user={id:'owner'};const first=await db.service.checkout(user,db.row.id,{planCode:'MANAGED',idempotencyKey:randomUUID()});
  await assert.rejects(db.service.verify(first.id,'S'+'2'.repeat(35),'OK'),{status:404});assert.equal(db.row.status,'DRAFT');
@@ -46,7 +57,7 @@ test('failed and cancelled payments retain drafts; a changed listing after late 
  db.row.version++;const late=await db.service.verify(first.id,db.orders[0].authority,'OK');assert.equal(late.status,'REVIEW_REQUIRED');assert.equal(db.row.status,'DRAFT');assert.equal(db.counts().activations,0);
 });
 test('upgrades cannot activate before verification and publication rejects forged or ineligible plans',async()=>{
- const db=database();await assert.rejects(db.service.checkout({id:'owner'},db.row.id,{planCode:'LADDER',idempotencyKey:randomUUID()}),{status:400});
+ const db=database();await assert.rejects(db.service.checkout({id:'owner'},db.row.id,{planCode:'LADDER',idempotencyKey:randomUUID()}),{status:409});
  db.row.draft.bodyCondition='تصادفی';await assert.rejects(db.service.checkout({id:'owner'},db.row.id,{planCode:'EXPRESS48',idempotencyKey:randomUUID()}),{status:400});db.row.draft.bodyCondition='سالم';
  await db.service.freePublish(db.row.id,'owner');db.row.status='PUBLISHED';const order=await db.service.checkout({id:'owner'},db.row.id,{planCode:'LADDER',idempotencyKey:randomUUID()});assert.equal(db.row.ladderUntil,undefined);
  await db.service.verify(order.id,db.orders[0].authority,'OK');assert.ok(db.row.ladderUntil>new Date());

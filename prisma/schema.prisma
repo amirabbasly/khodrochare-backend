@@ -768,6 +768,7 @@ model MarketAuditLog {
 
 
 model HallListing {
+  requestedBoosts String[] @default([])
   id String @id @default(uuid())
   ownerId String
   owner User @relation(fields: [ownerId], references: [id])

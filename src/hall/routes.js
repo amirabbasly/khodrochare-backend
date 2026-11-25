@@ -47,10 +47,10 @@ function registerHall({app,prisma,redis,config,auth,admin,limit,io,sms}){
   app.post(root+'/estimate',auth,limit('hall-estimate',40,60),async(req,res)=>res.json(await service.estimate(priceInput.parse(req.body),req.user.id)));
   app.post(root+'/mine/:id/captcha',auth,limit('hall-captcha',12,600),async(req,res)=>{const id=uuid.parse(req.params.id);await service.owned(id,req.user.id);res.set('Cache-Control','no-store').json(await captcha.issue(req.user.id,id));});
   app.post(root+'/mine/:id/captcha/solve',auth,limit('hall-captcha-solve',12,600),async(req,res)=>{const input=z.object({id:uuid,x:z.number().min(0).max(280)}).strict().parse(req.body);res.json(await captcha.solve(req.user.id,uuid.parse(req.params.id),input));});
-  app.post(root+'/mine/:id/publish',auth,limit('hall-publish',20,3600),async(req,res)=>{const id=uuid.parse(req.params.id),input=z.object({proof:uuid}).strict().parse(req.body);await captcha.consume(req.user.id,id,input.proof);res.json(await service.freePublish(id,req.user.id));});
+  app.post(root+'/mine/:id/publish',auth,limit('hall-publish',20,3600),async(req,res)=>{const id=uuid.parse(req.params.id),input=z.object({proof:uuid,planCodes:z.array(z.enum(['LADDER','FEATURED'])).max(2).default([])}).strict().parse(req.body);await captcha.consume(req.user.id,id,input.proof);res.json(await service.freePublish(id,req.user.id,input.planCodes));});
   app.delete(root+'/mine/:id',auth,async(req,res)=>{await service.remove(uuid.parse(req.params.id),req.user.id);res.status(204).end();});
   app.post(root+'/mine/:id/checkout',auth,limit('hall-checkout',20,3600),async(req,res)=>{
-    const input=z.object({planCode:z.enum(['MANAGED','REPAIR_SELL','EXPRESS48','LADDER','FEATURED']),idempotencyKey:uuid,method:z.enum(['GATEWAY','WALLET']).default('GATEWAY')}).strict().parse(req.body);
+    const input=z.object({planCode:z.enum(['MANAGED','REPAIR_SELL','EXPRESS48','LADDER','FEATURED']).optional(),planCodes:z.array(z.enum(['LADDER','FEATURED'])).min(1).max(2).optional(),idempotencyKey:uuid,method:z.enum(['GATEWAY','WALLET']).default('GATEWAY')}).strict().refine(v=>Boolean(v.planCode)!==Boolean(v.planCodes),'یک فهرست خدمات انتخاب کنید.').parse(req.body);
     if(['MANAGED','REPAIR_SELL','EXPRESS48'].includes(input.planCode))throw new HttpError(409,'در حال تکمیل بخش فنی');
     res.status(201).json(await service.checkout(req.user,uuid.parse(req.params.id),input));
   });
