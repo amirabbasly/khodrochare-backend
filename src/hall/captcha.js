@@ -1,8 +1,8 @@
 const {randomUUID,randomInt}=require('node:crypto');
 const {HttpError}=require('../domain');
 const piece='M0 0H14C10 -13 32 -13 28 0H42V14C55 10 55 32 42 28V42H28C32 55 10 55 14 42H0V28C-13 32 -13 10 0 14Z';
-function createCaptcha(redis){
-  const key=(type,user,listing,id)=>`hall:captcha:${type}:${user}:${listing}:${id}`;
+function createCaptcha(redis,namespace='hall'){
+  const key=(type,user,listing,id)=>`${namespace}:captcha:${type}:${user}:${listing}:${id}`;
   return {
     async issue(user,listing){
       const id=randomUUID(),x=randomInt(100,250),y=randomInt(35,85);

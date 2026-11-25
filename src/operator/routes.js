@@ -15,6 +15,7 @@ function registerOperator({app,prisma,redis,config,io,limit}){
  app.use(root,operatorAuth(config,redis),limit('operator-panel',180,60),(_req,res,next)=>{res.set('Cache-Control','no-store');next();});
  const audit=(tx,actor,action,targetId,details={})=>tx.operatorAudit.create({data:{id:randomUUID(),actorId:actor.id,actorRole:actor.role,actorName:actor.name,action,targetId,details}});
  require('./driver-verification').registerDriverReviews({app,root,prisma,config,audit,io});
+ require('../import-requests').registerImportReview({app,root,prisma});
  require('./locations').registerRequestLocations({app,root,prisma,config,id});
  app.get(root+'/requests',async(req,res)=>{
   const q=paging.extend({status:z.enum(['ALL','PENDING','OPERATOR','ACCEPTED','ARRIVED','COMPLETED','CANCELLED','EXPIRED']).default('ALL')}).parse(req.query);

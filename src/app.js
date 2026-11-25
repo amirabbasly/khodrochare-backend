@@ -53,6 +53,7 @@ function createApp({ prisma, redis, config, io, services: s, otpSms }) {
   require('./verification-documents').registerVerificationDocuments({app,prisma,services:s,auth,role});
   require('./driver-verification').registerVerificationNotices({app,prisma,auth,role});
   require('./driver-auth').registerDriverAuth({ app, prisma, config, services: s, limit, io, sms: otpSms });
+  require('./import-requests').registerImportRequests({app,prisma,redis,auth,limit});
   require('./operator/routes').registerOperator({app,prisma,redis,config,io,limit});
   app.get('/health/live', (req, res) => res.json({ status: 'ok' }));
   require('./gateway-routes').registerGateway({app,prisma,config,auth,role,limit});

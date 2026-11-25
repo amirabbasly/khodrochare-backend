@@ -24,6 +24,7 @@ async function eraseCustomer(tx, user, at) {
   // Keep anonymous references required by historical transactions and other
   // participants; erase login credentials and personal profile information.
   await tx.user.update({ where: { id: user.id }, data: { fullName: 'حساب حذف‌شده', phone: `deleted:${user.id}`, nationalId: null, passwordHash: null, phoneVerifiedAt: null, identityDocumentId: null, vehiclePlate: null, vehicleType: null, services: [], deletedAt: at } });
+  if(tx.importRequest)await tx.importRequest.deleteMany({where:{userId:user.id}});
   await tx.session.deleteMany({ where: { userId: user.id } });
   await tx.customerOtpChallenge.deleteMany({ where: { phone: user.phone } });
   await tx.userLocation.deleteMany({ where: { userId: user.id } });

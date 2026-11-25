@@ -25,6 +25,7 @@ enum RequestStatus {
   CANCELLED
 }
 model User {
+  importRequests ImportRequest[]
   id String @id @default(uuid())
   role Role
   fullName String
@@ -979,4 +980,20 @@ model WalletReceipt {
   entry WalletEntry?
   @@index([status,createdAt])
   @@index([userId,createdAt])
+}
+
+model ImportRequest {
+ id String @id @default(uuid())
+ userId String
+ user User @relation(fields:[userId],references:[id])
+ kind String
+ fullName String
+ phone String
+ city String
+ subject String
+ description String
+ partCode String @default("")
+ createdAt DateTime @default(now())
+ @@index([createdAt,id])
+ @@index([userId])
 }
