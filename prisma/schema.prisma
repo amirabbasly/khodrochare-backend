@@ -61,6 +61,7 @@ model User {
   checkouts GatewayCheckout[]
   walletReceipts WalletReceipt[]
   walletEntries WalletEntry[]
+  walletDebits WalletDebit[]
   hallListings HallListing[]
   hallOrders HallOrder[]
   hallInquiries HallInquiry[]
@@ -198,6 +199,7 @@ model Payment {
   method String @default("GATEWAY")
   cashReportedAt DateTime?
   cashWalletEntry WalletEntry?
+  walletDebit WalletDebit?
   status String @default("AWAITING_PAYMENT")
   serviceToman Int
   partsToman Int
@@ -249,6 +251,18 @@ model WalletEntry {
   mode String
   createdAt DateTime @default(now())
   @@index([userId,mode,createdAt])
+}
+model WalletDebit {
+  id String @id @default(uuid())
+  userId String
+  user User @relation(fields:[userId],references:[id])
+  paymentId String? @unique
+  payment Payment? @relation(fields:[paymentId],references:[id])
+  hallOrderId String? @unique
+  hallOrder HallOrder? @relation(fields:[hallOrderId],references:[id])
+  amountToman Int
+  createdAt DateTime @default(now())
+  @@index([userId,createdAt])
 }
 model PaymentAttempt {
   id String @id @default(uuid())
@@ -842,6 +856,7 @@ model HallOrder {
   createdAt DateTime @default(now())
   verifiedAt DateTime?
   activatedAt DateTime?
+  walletDebit WalletDebit?
   @@unique([userId, idempotencyKey])
   @@index([listingId, status])
   @@index([createdAt])
@@ -950,8 +965,9 @@ model WalletReceipt {
   id String @id @default(uuid())
   userId String
   user User @relation(fields:[userId],references:[id])
-  amountToman Int
-  bankReference String @unique
+  amountToman Int?
+  bankReference String? @unique
+  fileHash String? @unique
   storageKey String @unique
   mimeType String
   status String @default("SUBMITTED")

@@ -103,8 +103,8 @@ function registerOperator({app,prisma,redis,config,io,limit}){
   res.json({...safe,image:`data:${row.mimeType};base64,${buffer.toString('base64')}`});
  });
  app.post(root+'/receipts/:id/review',async(req,res)=>{
-  const receiptId=id.parse(req.params.id),input=z.object({version:z.number().int().nonnegative(),decision:z.enum(['APPROVE','REJECT']),note:z.string().trim().max(2000).default('')}).strict().parse(req.body);
-  await prisma.$transaction(tx=>require('../wallet-receipts').reviewReceipt(tx,receiptId,input.decision==='APPROVE',req.operatorActor,input.note,input.version));res.json({reviewed:true});
+  const receiptId=id.parse(req.params.id),input=z.object({version:z.number().int().nonnegative(),decision:z.enum(['APPROVE','REJECT']),amountToman:z.number().int().min(1).max(100000000).optional(),bankReference:z.string().regex(/^\d{6,30}$/).optional(),note:z.string().trim().max(2000).default('')}).strict().parse(req.body);
+  await prisma.$transaction(tx=>require('../wallet-receipts').reviewReceipt(tx,receiptId,input.decision==='APPROVE',req.operatorActor,input.note,input.version,input.amountToman,input.bankReference));res.json({reviewed:true});
  });
  app.get(root+'/listings',async(req,res)=>{
   const q=paging.extend({status:z.enum(['ALL','PENDING_REVIEW','PUBLISHED','REJECTED','DRAFT','BLOCKED','SOLD']).default('PENDING_REVIEW')}).parse(req.query);

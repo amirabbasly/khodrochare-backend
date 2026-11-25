@@ -10,6 +10,7 @@ function registerGateway({app,prisma,config,auth,role,limit}){
     res.status(201).json(await service.start(req.user,input));
   });
   app.post('/api/v1/requests/:id/payment/checkout',auth,role('CUSTOMER'),limit('payment-checkout',20,3600),async(req,res)=>res.status(201).json(await service.start(req.user,{...key.parse(req.body),requestId:req.params.id})));
+  app.post('/api/v1/requests/:id/payment/wallet',auth,role('CUSTOMER'),limit('wallet-pay',30,60),async(req,res)=>{z.object({confirmed:z.literal(true)}).strict().parse(req.body);res.json(require('./gateway-payments').safePayment(await require('./wallet-spending').payRequestWithWallet(prisma,z.string().uuid().parse(req.params.id),req.user.id),config.ZARINPAL_MODE));});
   async function owned(id,userId){const checkout=await prisma.gatewayCheckout.findFirst({where:{id,userId}});if(!checkout)throw new HttpError(404,'Payment attempt not found');return checkout;}
   app.get('/api/v1/payments/checkouts/:id',auth,async(req,res)=>res.set('Cache-Control','no-store').json(service.present(await owned(z.string().uuid().parse(req.params.id),req.user.id))));
   app.post('/api/v1/payments/checkouts/:id/verify',auth,limit('payment-verify',20,3600),async(req,res)=>{

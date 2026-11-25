@@ -7,7 +7,7 @@ function restrictedDriverAction(req){
  // Authentication, profile, documents, support and telemetry remain available.
  // Previously assigned work may still be finished while a review is pending.
  if(/^\/api\/v1\/requests\/[^/]+\/accept$/.test(req.path))return true;
- return /^\/api\/v1\/(hall|market|garage|assistant|gateway|wallet)(\/|$)/.test(req.path);
+ return /^\/api\/v1\/(hall|market|garage|assistant|gateway)(\/|$)/.test(req.path);
 }
 function registerVerificationNotices({app,prisma,auth,role}){
  app.post('/api/v1/me/verification-notices/:kind',auth,role('DRIVER'),async(req,res)=>{

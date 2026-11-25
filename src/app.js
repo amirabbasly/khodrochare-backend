@@ -299,6 +299,7 @@ function createApp({ prisma, redis, config, io, services: s, otpSms }) {
     if (req.path.includes('/market') && err.code === 'P2002') return res.status(409).json({ error: 'Market record already exists' });
     if (req.path.includes('/market') && err.code === 'P2025') return res.status(404).json({ error: 'Market record not found' });
     if (req.path.includes('/market') && err.code === 'P2003') return res.status(400).json({ error: 'Invalid market reference' });
+    if(err.code==='P2002'&&req.path.includes('/receipts'))return res.status(409).json({error:'تصویر رسید یا شماره پیگیری بانکی قبلاً ثبت شده است.'});
     if (err.code === 'P2002') return res.status(409).json({ error: req.path.includes('payment') || req.path.includes('wallet') ? 'Payment attempt already exists' : 'Phone or national ID already registered for this role' });
     if (err instanceof multer.MulterError) return res.status(400).json({ error: err.message });
     const status = err.status >= 400 && err.status < 500 ? err.status : err.status === 503 ? 503 : err instanceof d.HttpError && err.status === 502 ? 502 : 500;

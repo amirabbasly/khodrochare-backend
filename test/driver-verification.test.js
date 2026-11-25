@@ -12,7 +12,7 @@ test('driver verification: pending login and offers, private document review, ve
  const db=await PGlite.create(),tcp=new PGLiteSocketServer({db,host:'127.0.0.1',port:0});let prisma,server;
  try{
   for(const e of Prisma.dmmf.datamodel.enums)await db.exec(`CREATE TYPE "${e.name}" AS ENUM (${e.values.map(v=>`'${v.name}'`).join(',')})`);
-  const names=['User','Document','Session','CustomerOtpChallenge','Vehicle','AssistanceRequest','Payment','PaymentAttempt','WalletEntry','DriverEarning','Outbox','GatewayCheckout','OperatorAudit','UserLocation','DriverLocation'];
+  const names=['User','Document','Session','CustomerOtpChallenge','Vehicle','AssistanceRequest','Payment','PaymentAttempt','WalletDebit','WalletEntry','DriverEarning','Outbox','GatewayCheckout','OperatorAudit','UserLocation','DriverLocation'];
   for(const model of Prisma.dmmf.datamodel.models.filter(m=>names.includes(m.name))){
    const columns=model.fields.filter(f=>f.kind!=='object'&&!(model.name==='Document'&&['verificationKind','vehicleEvidenceType'].includes(f.name))&&!(model.name==='User'&&['verificationStatus','verificationVersion','verificationReviewedAt','verificationReviewedBy','verificationNote','registrationNoticeSeenAt','verificationNoticeSeenAt'].includes(f.name))).map(f=>{
     const type=f.kind==='enum'?`"${f.type}"`:({String:'TEXT',Int:'INTEGER',BigInt:'BIGINT',Float:'DOUBLE PRECISION',Boolean:'BOOLEAN',DateTime:'TIMESTAMP(3)',Json:'JSONB'}[f.type]);if(!type)return null;

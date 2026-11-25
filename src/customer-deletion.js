@@ -1,19 +1,20 @@
 const { HttpError } = require('./domain');
 
 async function assertDeletable(db, userId) {
-  const [request, checkout, order, payment, wallet, receipt] = await Promise.all([
+  const [request, checkout, order, payment, wallet, receipt, spent] = await Promise.all([
     db.assistanceRequest.findFirst({ where: { customerId: userId, status: { in: ['PENDING', 'ACCEPTED', 'ARRIVED'] } }, select: { id: true } }),
     db.gatewayCheckout.findFirst({ where: { userId, status: { in: ['CREATING', 'PENDING', 'REFUND_REQUIRED', 'DUPLICATE_PAYMENT'] } }, select: { id: true } }),
     db.hallOrder.findFirst({ where: { userId, status: { in: ['CREATING', 'PENDING', 'REFUND_REQUIRED', 'REVIEW_REQUIRED'] } }, select: { id: true } }),
     db.payment.findFirst({ where: { request: { customerId: userId }, OR: [{ status: 'REFUND_REQUIRED' }, { status: { in: ['AWAITING_PAYMENT', 'AWAITING_TRANSFER', 'SUBMITTED', 'GATEWAY_PENDING'] }, request: { status: { notIn: ['CANCELLED','EXPIRED'] } } }] }, select: { id: true } }),
     db.walletEntry.aggregate({ where: { userId, mode: 'live' }, _sum: { amountToman: true } }),
     db.walletReceipt.findFirst({where:{userId,status:'SUBMITTED'},select:{id:true}}),
+    db.walletDebit.aggregate({where:{userId},_sum:{amountToman:true}}),
   ]);
   if (request) throw new HttpError(409, 'پیش از حذف حساب، درخواست امداد فعال خود را پایان دهید یا لغو کنید.');
   if (checkout || order) throw new HttpError(409, 'یک پرداخت درگاه یا بازپرداخت هنوز تعیین تکلیف نشده است؛ ابتدا وضعیت آن را از بخش پرداخت بررسی کنید.');
   if (payment) throw new HttpError(409, 'هزینهٔ یکی از خدمات هنوز تأیید یا تسویه نشده است؛ ابتدا پرداخت آن را تکمیل کنید.');
   if(receipt)throw new HttpError(409,'رسید واریز شما در انتظار بررسی است؛ ابتدا نتیجهٔ آن مشخص شود.');
-  if (wallet._sum.amountToman) throw new HttpError(409, 'کیف پول شما موجودی دارد؛ برای تسویهٔ موجودی پیش از حذف حساب با پشتیبانی تماس بگیرید.');
+  if ((wallet._sum.amountToman||0)-(spent._sum.amountToman||0)) throw new HttpError(409, 'کیف پول شما موجودی دارد؛ برای تسویهٔ موجودی پیش از حذف حساب با پشتیبانی تماس بگیرید.');
 }
 
 async function eraseCustomer(tx, user, at) {

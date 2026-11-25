@@ -12,7 +12,7 @@ function registerHall({app,prisma,redis,config,auth,admin,limit,io,sms}){
   app.use(management,admin);
   require('./chat').registerChat({app,prisma,redis,auth,limit,io});
   const captcha=require('./captcha').createCaptcha(redis);
-  const catalog=async()=>{await service.ready();const[plans,banners]=await Promise.all([prisma.hallPlan.findMany({where:{active:true},orderBy:{sortOrder:'asc'}}),prisma.hallBanner.findMany({where:{active:true},orderBy:[{sortOrder:'asc'},{id:'asc'}]})]);return{plans,banners,paymentMode:'sandbox',tariffNotice:'تعرفه‌های جاری این محیط برای پرداخت آزمایشی هستند؛ وجه واقعی دریافت نمی‌شود.'};};
+  const catalog=async()=>{await service.ready();const[plans,banners]=await Promise.all([prisma.hallPlan.findMany({where:{active:true},orderBy:{sortOrder:'asc'}}),prisma.hallBanner.findMany({where:{active:true},orderBy:[{sortOrder:'asc'},{id:'asc'}]})]);return{plans,banners,paymentMode:'sandbox',walletPaymentAvailable:true,tariffNotice:'درگاه این محیط آزمایشی است؛ پرداخت با کیف پول از موجودی واقعی شما کسر می‌شود.'};};
   app.get(root+'/catalog',async(_req,res)=>res.json(await catalog()));
   app.get(root+'/vehicles',async(req,res)=>{
     const q=z.object({q:z.string().max(100).default(''),make:z.string().max(100).optional(),model:z.string().max(100).optional()}).parse(req.query);
@@ -54,7 +54,7 @@ function registerHall({app,prisma,redis,config,auth,admin,limit,io,sms}){
   app.post(root+'/mine/:id/publish',auth,limit('hall-publish',20,3600),async(req,res)=>{const id=uuid.parse(req.params.id),input=z.object({proof:uuid}).strict().parse(req.body);await captcha.consume(req.user.id,id,input.proof);res.json(await service.freePublish(id,req.user.id));});
   app.delete(root+'/mine/:id',auth,async(req,res)=>{await service.remove(uuid.parse(req.params.id),req.user.id);res.status(204).end();});
   app.post(root+'/mine/:id/checkout',auth,limit('hall-checkout',20,3600),async(req,res)=>{
-    const input=z.object({planCode:z.enum(['MANAGED','REPAIR_SELL','EXPRESS48','LADDER','URGENT','FEATURED']),idempotencyKey:uuid}).strict().parse(req.body);
+    const input=z.object({planCode:z.enum(['MANAGED','REPAIR_SELL','EXPRESS48','LADDER','URGENT','FEATURED']),idempotencyKey:uuid,method:z.enum(['GATEWAY','WALLET']).default('GATEWAY')}).strict().parse(req.body);
     if(['MANAGED','REPAIR_SELL','EXPRESS48'].includes(input.planCode))throw new HttpError(409,'در حال تکمیل بخش فنی');
     res.status(201).json(await service.checkout(req.user,uuid.parse(req.params.id),input));
   });

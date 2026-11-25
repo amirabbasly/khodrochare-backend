@@ -17,7 +17,7 @@ test('real migration/Prisma/HTTP: signed operator actions, safe dispatch, user c
  try{
   // Use the generated Prisma model for the baseline fixture; apply the real new
   // migration. Geography is not queried by this management module.
-  const names=new Set(['User','Session','CustomerOtpChallenge','AssistanceRequest','Payment','PaymentAttempt','GatewayCheckout','DriverEarning','Outbox','HallListing','HallPhoto','HallOrder','HallPlan','Vehicle','MaintenanceRecord','WalletEntry','SupportTicket','UserLocation','DriverLocation']);
+  const names=new Set(['User','Session','CustomerOtpChallenge','AssistanceRequest','Payment','PaymentAttempt','GatewayCheckout','DriverEarning','Outbox','HallListing','HallPhoto','HallOrder','HallPlan','Vehicle','MaintenanceRecord','WalletDebit','WalletEntry','SupportTicket','UserLocation','DriverLocation']);
   const added={Payment:['method','cashReportedAt'],WalletEntry:['receiptId','paymentId'],User:['isActive'],AssistanceRequest:['operatorConfirmedAt','operatorActorId','operatorActorName','operatorNotes'],HallListing:['submittedAt','reviewedAt','reviewedBy','moderationNote'],HallPlan:['originalPriceToman']};
   for(const e of Prisma.dmmf.datamodel.enums)await db.exec(`CREATE TYPE "${e.name}" AS ENUM (${e.values.map(v=>`'${v.name}'`).join(',')})`);
   for(const model of Prisma.dmmf.datamodel.models.filter(m=>names.has(m.name))){
@@ -35,6 +35,7 @@ test('real migration/Prisma/HTTP: signed operator actions, safe dispatch, user c
   await db.exec(`ALTER TABLE "HallListing" ADD CONSTRAINT "HallListing_status_check" CHECK(status IN ('DRAFT','PUBLISHED','BLOCKED','SOLD','DELETED'));CREATE UNIQUE INDEX "HallPlan_code_key" ON "HallPlan"(code);`);
   await db.exec(await readFile(path.join(__dirname,'../prisma/migrations/202611230003_operator_superapp/migration.sql'),'utf8'));
   await db.exec(await readFile(path.join(__dirname,'../prisma/migrations/202611230004_onsite_cash_receipts/migration.sql'),'utf8'));
+  await db.exec(await readFile(path.join(__dirname,'../prisma/migrations/202611240005_receipt_review_amount/migration.sql'),'utf8'));
   await tcp.start();prisma=new PrismaClient({datasources:{db:{url:`postgresql://postgres:postgres@${tcp.getServerConn()}/postgres?schema=public&connection_limit=1&sslmode=disable`}},transactionOptions:{timeout:20000}});
   const passwordHash=await hashPassword('oldPassword123');
   const customer=await prisma.user.create({data:{role:'CUSTOMER',fullName:'مشتری آزمایشی',phone:'09121234567',passwordHash,nationalId:'1234567891',services:[]}});
@@ -118,15 +119,16 @@ test('real migration/Prisma/HTTP: signed operator actions, safe dispatch, user c
   const receiptDetail=await call(`/receipts/${receipt.id}`);assert.equal(receiptDetail.status,200);assert.ok(receiptDetail.data.image.startsWith('data:image/png;base64,'));assert.equal(receiptDetail.data.storageKey,undefined);
 
   assert.equal(await driverBalance(prisma,driver.id),-290000,'submission never credits a wallet');
-  const receiptReview=await call(`/receipts/${receipt.id}/review`,'POST',{version:0,decision:'APPROVE',note:'واریز در حساب شرکت تطبیق شد'});assert.equal(receiptReview.status,200);
+  const receiptReview=await call(`/receipts/${receipt.id}/review`,'POST',{version:0,decision:'APPROVE',amountToman:290000,note:'واریز در حساب شرکت تطبیق شد'});assert.equal(receiptReview.status,200);
   assert.equal(await driverBalance(prisma,driver.id),0);await assertDriverCredit(prisma,driver.id);
   assert.equal((await call(`/receipts/${receipt.id}/review`,'POST',{version:0,decision:'APPROVE',note:''})).status,409);assert.equal(await prisma.walletEntry.count({where:{receiptId:receipt.id}}),1);
   const rejectedReceipt=await prisma.walletReceipt.create({data:{userId:driver.id,amountToman:10000,bankReference:'987654322',storageKey:'receipt-fixture-2',mimeType:'image/png'}});
   assert.equal((await call(`/receipts/${rejectedReceipt.id}/review`,'POST',{version:0,decision:'REJECT',note:''})).status,400);
   assert.equal((await call(`/receipts/${rejectedReceipt.id}/review`,'POST',{version:0,decision:'REJECT',note:'واریز بانکی تطبیق ندارد'})).status,200);assert.equal(await driverBalance(prisma,driver.id),0);
+  form.set('file',new Blob([Buffer.from('89504e470d0a1a0a','hex'),Buffer.from('new receipt')],{type:'image/png'}),'new.png');
   form.set('bankReference','987654322');form.set('amountToman','10000');
   const resubmittedReceipt=await fetch(base+'/api/v1/wallet/receipts',{method:'POST',headers:{'X-Fixture-User':driver.id},body:form});assert.equal(resubmittedReceipt.status,201);assert.equal((await resubmittedReceipt.json()).id,rejectedReceipt.id);
   assert.equal((await call(`/receipts/${rejectedReceipt.id}/review`,'POST',{version:0,decision:'APPROVE',note:''})).status,409,'a stale review cannot approve a resubmitted image');
-  assert.equal((await call(`/receipts/${rejectedReceipt.id}/review`,'POST',{version:2,decision:'APPROVE',note:'بانک تطبیق شد'})).status,200);assert.equal(await driverBalance(prisma,driver.id),10000);
+  assert.equal((await call(`/receipts/${rejectedReceipt.id}/review`,'POST',{version:2,decision:'APPROVE',amountToman:10000,note:'بانک تطبیق شد'})).status,200);assert.equal(await driverBalance(prisma,driver.id),10000);
  }finally{if(server)await new Promise(resolve=>server.close(resolve));if(prisma)await prisma.$disconnect();await tcp.stop();await db.close();if(uploads){const fs=require('node:fs/promises');for(const file of await fs.readdir(uploads))await fs.unlink(path.join(uploads,file));await fs.rmdir(uploads);}}
 });

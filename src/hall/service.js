@@ -76,13 +76,14 @@ function createHall(prisma,config,provider=createZarinpal({...config,ZARINPAL_MO
     const rows=await prisma.hallListing.findMany({where:{status:'PUBLISHED',ownerId:{not:userId},makeKey:normalize(data.make),modelKey:normalize(data.model),trimKey:normalize(data.trim),year:data.year,mileage:{gte:Math.floor(Math.max(0,data.mileage-Math.max(20000,data.mileage*.25))),lte:Math.round(data.mileage+Math.max(20000,data.mileage*.25))},bodyCondition:data.bodyCondition,technicalCondition:data.technicalCondition,priceToman:{not:null},publishedAt:{gte:new Date(Date.now()-30*86400000)}},orderBy:{publishedAt:'desc'},take:200,select:{ownerId:true,priceToman:true,publishedAt:true}});
     const result=analyzePrices(rows);return{...result,isEstimate:result.sampleCount<5,criteria:'برند، مدل، تیپ، سال و وضعیت یکسان؛ اختلاف کارکرد حداکثر ۲۵٪ یا ۲۰ هزار کیلومتر',suggested:result.median?Math.round(result.median*.98/100000)*100000:null};
   }
-  const orderDto=o=>({id:o.id,listingId:o.listingId,status:o.status,mode:o.mode,amountToman:o.amountToman,refId:o.refId,planName:o.snapshot.name,errorCode:o.errorCode,url:o.status==='PENDING'?provider.redirect(o.authority,o.mode):null});
+  const orderDto=o=>({id:o.id,listingId:o.listingId,status:o.status,mode:o.mode,amountToman:o.amountToman,refId:o.refId,planName:o.snapshot.name,paymentMethod:o.refId?.startsWith('WALLET-')?'WALLET':'GATEWAY',errorCode:o.errorCode,url:o.status==='PENDING'?provider.redirect(o.authority,o.mode):null});
   async function checkout(user,id,input){
-    await ready();
+    await ready();const usingWallet=input.method==='WALLET';
     const order=await prisma.$transaction(async tx=>{
+      if(usingWallet)await tx.$queryRaw`SELECT id FROM "User" WHERE id=${user.id} FOR UPDATE`;
       await lock(tx,id);const row=await owned(id,user.id,tx);
       const existing=await tx.hallOrder.findUnique({where:{userId_idempotencyKey:{userId:user.id,idempotencyKey:input.idempotencyKey}}});
-      if(existing){if(existing.listingId!==id||existing.planCode!==input.planCode)throw new HttpError(409,'شناسه پرداخت تکراری است.');return existing;}
+      if(existing){if(existing.listingId!==id||existing.planCode!==input.planCode||!!existing.refId?.startsWith('WALLET-')!==usingWallet)throw new HttpError(409,'شناسه پرداخت تکراری است.');return existing;}
       const action=row.status==='PUBLISHED'?'UPGRADE':'PUBLISH';
       if(!['DRAFT','PUBLISHED','PENDING_REVIEW','REJECTED'].includes(row.status))throw new HttpError(409,'آگهی در وضعیت قابل انتشار نیست.');
       await validatePublish(tx,row);
@@ -92,15 +93,18 @@ function createHall(prisma,config,provider=createZarinpal({...config,ZARINPAL_MO
       const pending=await tx.hallOrder.findFirst({where:{listingId:id,status:{in:['CREATING','PENDING']}}});
       if(pending){
         if(pending.status==='CREATING'&&Date.now()-pending.createdAt.getTime()>120000)await tx.hallOrder.update({where:{id:pending.id},data:{status:'FAILED',errorCode:'REQUEST_EXPIRED'}});
-        else if(pending.planCode===plan.code)return pending;
+        else if(!usingWallet&&pending.planCode===plan.code)return pending;
         else throw new HttpError(409,'یک پرداخت دیگر در جریان است.');
       }
       if(action==='UPGRADE'){
         const last=await tx.hallOrder.findFirst({where:{listingId:id,planCode:plan.code,status:'VERIFIED'},orderBy:{activatedAt:'desc'}});
         if(last?.activatedAt&&new Date(last.activatedAt.getTime()+last.snapshot.durationHours*3600000)>new Date())throw new HttpError(409,'این خدمت هنوز فعال است.');
       }
-      return tx.hallOrder.create({data:{userId:user.id,listingId:id,listingVersion:row.version,action,planCode:plan.code,snapshot:JSON.parse(JSON.stringify(plan)),amountToman:plan.priceToman,mode:provider.mode,idempotencyKey:input.idempotencyKey}});
+      const created=await tx.hallOrder.create({data:{userId:user.id,listingId:id,listingVersion:row.version,action,planCode:plan.code,snapshot:JSON.parse(JSON.stringify(plan)),amountToman:plan.priceToman,mode:usingWallet?'live':provider.mode,idempotencyKey:input.idempotencyKey,...(usingWallet?{refId:'WALLET-'+input.idempotencyKey}:{})}});
+      if(usingWallet){await require('../wallet-spending').spendWallet(tx,user.id,{hallOrderId:created.id,amountToman:created.amountToman});return activate(tx,created,row);}
+      return created;
     });
+    if(usingWallet)return orderDto(order);
     if(['PENDING','VERIFIED'].includes(order.status))return orderDto(order);
     if(order.status!=='CREATING')throw new HttpError(409,'برای تلاش مجدد پرداخت تازه ایجاد کنید.');
     if(!(await prisma.hallOrder.updateMany({where:{id:order.id,status:'CREATING',errorCode:null},data:{errorCode:'REQUESTING'}})).count)throw new HttpError(409,'در حال آماده‌سازی درگاه؛ چند لحظه دیگر بررسی کنید.');

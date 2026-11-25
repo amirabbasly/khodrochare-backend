@@ -61,7 +61,7 @@ test('available HTTP filters elapsed requests and acceptance rechecks the deadli
   const fresh = { ...old, id: 'fresh', createdAt: new Date() };
   const extra=['MOBILE_CARWASH','PERIODIC_SERVICE','INSPECTION'].map(service=>({...fresh,id:service,service}));
   const requests = [old, fresh,...extra]; const events = [];let balance=0;
-  const prisma = { user:{findUnique:async()=>({role:'DRIVER',verificationStatus:'APPROVED'})},walletEntry:{aggregate:async()=>({_sum:{amountToman:balance}})},driverEarning:{aggregate:async()=>({_sum:{amountToman:0}})},assistanceRequest: {
+  const prisma = { walletDebit:{aggregate:async()=>({_sum:{amountToman:0}})},user:{findUnique:async()=>({role:'DRIVER',verificationStatus:'APPROVED'})},walletEntry:{aggregate:async()=>({_sum:{amountToman:balance}})},driverEarning:{aggregate:async()=>({_sum:{amountToman:0}})},assistanceRequest: {
     findMany: async ({ where }) => where.customerId ? requests : requests.filter(r => r.status === where.status && r.driverId === where.driverId && r.createdAt > where.createdAt.gt && where.service.in.includes(r.service)),
     count: async () => 0,
     updateMany: async ({ where, data }) => { assert.ok(where.createdAt.gt instanceof Date); const r = requests.find(r => r.id === where.id && r.status === where.status && !r.driverId && where.service.in.includes(r.service) && r.createdAt > where.createdAt.gt); if (!r) return { count: 0 }; Object.assign(r, data); return { count: 1 }; },

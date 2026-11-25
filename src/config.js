@@ -2,8 +2,8 @@ require('dotenv').config({ quiet: true });
 const { z } = require('zod');
 const config = z.object({
   ON_SITE_TARIFFS_JSON: z.string().optional(),
-  WALLET_TRANSFER_CARD: z.string().default(''),
-  WALLET_TRANSFER_ACCOUNT: z.string().default(''),
+  WALLET_TRANSFER_CARD: z.string().default('6219861435789192'),
+  WALLET_TRANSFER_ACCOUNT: z.string().default('خودروچاره (ابوالفضل سلیمانی قرخلو)'),
   OPERATOR_BRIDGE_SECRET: z.string().min(32).optional(),
   NIAZPARDAZ_API_KEY: z.string().trim().default(''),
   NIAZPARDAZ_SENDER: z.string().regex(/^\d{4,20}$/).default('10009611'),
