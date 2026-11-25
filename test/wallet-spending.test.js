@@ -9,7 +9,7 @@ const {createApp}=require('../src/app');
 const {createServices}=require('../src/services');
 const {bridgeSignature}=require('../src/operator/auth');
 const {walletBalance}=require('../src/wallet-spending');
-test('real receipt/spending migrations: image-only review, both roles, five services, Hall wallet purchase, idempotence, ownership, insufficient and concurrent funds',{timeout:120000},async()=>{
+test('real receipt/spending migrations: Hall wallet mode regression, image-only review, both roles, five services, idempotence, ownership, insufficient and concurrent funds',{timeout:120000},async()=>{
  const db=await PGlite.create(),tcp=new PGLiteSocketServer({db,host:'127.0.0.1',port:0});let prisma,server,uploads;
  try{
   for(const e of Prisma.dmmf.datamodel.enums)await db.exec(`CREATE TYPE "${e.name}" AS ENUM (${e.values.map(v=>`'${v.name}'`).join(',')})`);
@@ -60,7 +60,19 @@ test('real receipt/spending migrations: image-only review, both roles, five serv
   const full={make:'پژو',model:'207',trim:'پانوراما',year:1403,mileage:20000,color:'سفید',bodyCondition:'سالم',technicalCondition:'سالم',city:'تهران',description:'خودرو سالم با سابقه سرویس و نگهداری منظم',contactPhone:customer.phone,priceToman:3500000000,fuelType:'بنزین',gearboxType:'اتوماتیک',location:{latitude:35.7,longitude:51.4,visibility:'AREA'}};
   const listing=await prisma.hallListing.create({data:{ownerId:customer.id,status:'PUBLISHED',draft:full}});await prisma.hallPhoto.create({data:{listingId:listing.id,storageKey:randomUUID(),mimeType:'image/png',position:0}});
   await call('/hall/catalog');const plan=await prisma.hallPlan.findUnique({where:{code:'LADDER'}}),key=randomUUID();
+  // Reproduce the production constraint from the actual original Hall migration.
+  const hallSql=await migration('202611180003_car_hall');
+  const modeCheck=hallSql.split('\n').find(line=>line.includes('ADD CONSTRAINT "HallOrder_mode_check"'));
+  assert.ok(modeCheck);await db.exec(modeCheck);
+  const beforeFailed=await walletBalance(prisma,customer.id);
+  const failedHall=await call(`/hall/mine/${listing.id}/checkout`,'POST',{planCode:'LADDER',idempotencyKey:key,method:'WALLET'});
+  assert.equal(failedHall.status,500);assert.equal(await walletBalance(prisma,customer.id),beforeFailed);
+  assert.equal(await prisma.hallOrder.count({where:{listingId:listing.id}}),0);
+  assert.equal(await prisma.walletDebit.count({where:{hallOrderId:{not:null}}}),0);
+  await db.exec(await migration('202611240007_hall_wallet_mode'));
   const hall=await call(`/hall/mine/${listing.id}/checkout`,'POST',{planCode:'LADDER',idempotencyKey:key,method:'WALLET'});assert.equal(hall.status,201,JSON.stringify(hall));assert.equal(hall.data.paymentMethod,'WALLET');assert.equal(hall.data.mode,'live');assert.equal(hall.data.status,'VERIFIED');assert.ok((await prisma.hallListing.findUnique({where:{id:listing.id}})).ladderUntil>new Date());expected-=plan.priceToman;
+  for(const data of [{mode:'live'},{mode:'live',refId:'GATEWAY-123'},{mode:'live',refId:'WALLET-test',authority:'gateway-authority'},{mode:'invalid'}])await assert.rejects(prisma.hallOrder.create({data:{userId:customer.id,listingId:listing.id,listingVersion:0,action:'UPGRADE',planCode:'LADDER',snapshot:{},amountToman:99000,idempotencyKey:randomUUID(),...data}}),/HallOrder_mode_check/);
+  await prisma.hallOrder.create({data:{userId:customer.id,listingId:listing.id,listingVersion:0,action:'UPGRADE',planCode:'FEATURED',snapshot:{},amountToman:199000,idempotencyKey:randomUUID(),mode:'sandbox',status:'FAILED'}});
   assert.equal(await walletBalance(prisma,customer.id),expected);assert.equal((await call(`/hall/mine/${listing.id}/checkout`,'POST',{planCode:'LADDER',idempotencyKey:key,method:'WALLET'})).status,201);assert.equal(await prisma.walletDebit.count({where:{hallOrderId:hall.data.id}}),1);
   assert.equal((await call(`/hall/mine/${listing.id}/checkout`,'POST',{planCode:'LADDER',idempotencyKey:randomUUID(),method:'WALLET'})).status,409);
   const queued=await prisma.hallListing.create({data:{ownerId:customer.id,status:'PENDING_REVIEW',draft:full}});
