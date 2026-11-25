@@ -105,9 +105,15 @@ test('real receipt/spending migrations: Hall wallet mode regression, image-only 
   assert.equal((await call(bundlePath,'POST',{planCodes:[...bundleCodes].reverse(),idempotencyKey:bundleKey,method:'WALLET'})).status,201);
   assert.equal(await walletBalance(prisma,customer.id),expected);
   const sent=await prisma.hallListing.findUnique({where:{id:draftBundle.id}});assert.equal(sent.status,'PENDING_REVIEW');
+  const pendingOwned=await call(`/hall/mine/${sent.id}`);assert.deepEqual(pendingOwned.data.paidBoosts.sort(),['FEATURED','LADDER']);
   assert.ok((await operator('/listings?status=ALL')).data.items.some(row=>row.id===draftBundle.id));
   assert.equal((await operator(`/listings/${sent.id}/review`,'POST',{decision:'APPROVE',version:sent.version})).status,200);
   const activeBundle=await prisma.hallListing.findUnique({where:{id:sent.id}});assert.ok(activeBundle.ladderUntil>new Date());assert.ok(activeBundle.featuredUntil>new Date());
+  const edited=await hallService.save(sent.id,customer.id,full,activeBundle.version);
+  assert.deepEqual(edited.paidBoosts.sort(),['FEATURED','LADDER']);
+  const republished=await hallService.freePublish(sent.id,customer.id,['LADDER','FEATURED']);assert.equal(republished.status,'PENDING_REVIEW');
+  assert.equal(await prisma.hallOrder.count({where:{listingId:sent.id}}),1);assert.equal(await walletBalance(prisma,customer.id),expected);
+  assert.equal((await operator(`/listings/${sent.id}/review`,'POST',{decision:'APPROVE',version:republished.version})).status,200);
   assert.equal((await call(`/hall/mine/${sent.id}/checkout`,'POST',{planCode:'FEATURED',idempotencyKey:randomUUID(),method:'WALLET'})).status,409);
   const feedNow=Date.now();let newest;
   for(let i=0;i<6;i++)newest=await prisma.hallListing.create({data:{ownerId:customer.id,status:'PUBLISHED',draft:full,ladderUntil:new Date(feedNow+3600000),bumpedAt:new Date(feedNow+(i+1)*1000)}});

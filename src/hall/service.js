@@ -3,11 +3,11 @@ const {HttpError}=require('../domain');
 const {publicLocation}=require('./location');
 const {createZarinpal}=require('../zarinpal');
 const {publicationDetails,details,indexFields,analyzePrices,expressEligible,defaultPlans,planSchema,bannerSchema,normalize}=require('./domain');
-const include={photos:{orderBy:{position:'asc'}},orders:{where:{status:'VERIFIED',activatedAt:{not:null}},orderBy:{verifiedAt:'desc'}}};
+const include={photos:{orderBy:{position:'asc'}},orders:{where:{status:'VERIFIED'},orderBy:{verifiedAt:'desc'}}};
 const lock=async(tx,id)=>tx.$queryRaw`SELECT id FROM "HallListing" WHERE id=${id} FOR UPDATE`;
 function listingDto(row,owned=false){
   const{ownerId,owner,draft,photos,orders,verifiedContactPhone,reviewedBy,moderationNote,...rest}=row;
-  return{...rest,...(owned?{verifiedContactPhone,reviewedBy,moderationNote}:{}),seller:owner?{fullName:owner.fullName}:undefined,priceToman:row.priceToman==null?null:Number(row.priceToman),details:owned?draft:undefined,contactPhone:row.status==='PUBLISHED'||owned?draft.contactPhone:undefined,
+  return{...rest,...(owned?{verifiedContactPhone,reviewedBy,moderationNote,paidBoosts:[...new Set((orders||[]).flatMap(o=>orderPlans(o).map(p=>p.code)).filter(code=>['LADDER','FEATURED'].includes(code)))]}:{}),seller:owner?{fullName:owner.fullName}:undefined,priceToman:row.priceToman==null?null:Number(row.priceToman),details:owned?draft:undefined,contactPhone:row.status==='PUBLISHED'||owned?draft.contactPhone:undefined,
     fuelType:draft.fuelType,gearboxType:draft.gearboxType,chassisCondition:draft.chassisCondition,gearboxCondition:draft.gearboxCondition,location:owned?draft.location:publicLocation(draft.location),
     description:row.status==='PUBLISHED'||owned?draft.description:undefined,color:draft.color,
     photos:(photos||[]).map(p=>({id:p.id,url:`/hall/photos/${p.id}`+(owned?`?token=${p.readToken}`:'')})),
@@ -68,8 +68,10 @@ function createHall(prisma,config,provider=createZarinpal({...config,ZARINPAL_MO
     await lock(tx,id);const row=await owned(id,userId,tx);
     if(['PUBLISHED','PENDING_REVIEW'].includes(row.status))return listingDto(row,true);
     await editable(tx,row);await validatePublish(tx,row);
-    if(planCodes.length){
-      const requestedBoosts=[...new Set(planCodes)].sort();
+    const paidBoosts=new Set((row.orders||[]).flatMap(o=>orderPlans(o).map(p=>p.code)));
+    const unpaidCodes=planCodes.filter(code=>!paidBoosts.has(code));
+    if(unpaidCodes.length){
+      const requestedBoosts=[...new Set(unpaidCodes)].sort();
       const plans=await tx.hallPlan.findMany({where:{code:{in:requestedBoosts},active:true,kind:'BOOST'}});
       if(plans.length!==requestedBoosts.length)throw new HttpError(400,'خدمات انتخاب‌شده معتبر نیست.');
       return listingDto(await tx.hallListing.update({where:{id},data:{status:'DRAFT',requestedBoosts,submittedAt:null,version:{increment:1}},include}),true);
