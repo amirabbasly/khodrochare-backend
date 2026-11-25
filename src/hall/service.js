@@ -84,10 +84,11 @@ function createHall(prisma,config,provider=createZarinpal({...config,ZARINPAL_MO
       await lock(tx,id);const row=await owned(id,user.id,tx);
       const existing=await tx.hallOrder.findUnique({where:{userId_idempotencyKey:{userId:user.id,idempotencyKey:input.idempotencyKey}}});
       if(existing){if(existing.listingId!==id||existing.planCode!==input.planCode||!!existing.refId?.startsWith('WALLET-')!==usingWallet)throw new HttpError(409,'شناسه پرداخت تکراری است.');return existing;}
-      const action=row.status==='PUBLISHED'?'UPGRADE':'PUBLISH';
+      const action=['PUBLISHED','PENDING_REVIEW'].includes(row.status)?'UPGRADE':'PUBLISH';
       if(!['DRAFT','PUBLISHED','PENDING_REVIEW','REJECTED'].includes(row.status))throw new HttpError(409,'آگهی در وضعیت قابل انتشار نیست.');
       await validatePublish(tx,row);
       const plan=await tx.hallPlan.findUnique({where:{code:input.planCode}});
+      if(plan?.code==='URGENT')throw new HttpError(400,'خدمت فوری دیگر ارائه نمی‌شود.');
       if(!plan?.active||plan.priceToman<=0||plan.kind!==(action==='PUBLISH'?'PLAN':'BOOST'))throw new HttpError(400,'طرح انتخاب‌شده معتبر نیست.');
       if(plan.code==='EXPRESS48'&&!expressEligible(row.draft))throw new HttpError(400,'این خودرو شرایط طرح ۴۸ ساعته را ندارد.');
       const pending=await tx.hallOrder.findFirst({where:{listingId:id,status:{in:['CREATING','PENDING']}}});
@@ -98,7 +99,7 @@ function createHall(prisma,config,provider=createZarinpal({...config,ZARINPAL_MO
       }
       if(action==='UPGRADE'){
         const last=await tx.hallOrder.findFirst({where:{listingId:id,planCode:plan.code,status:'VERIFIED'},orderBy:{activatedAt:'desc'}});
-        if(last?.activatedAt&&new Date(last.activatedAt.getTime()+last.snapshot.durationHours*3600000)>new Date())throw new HttpError(409,'این خدمت هنوز فعال است.');
+        if(last&&(!last.activatedAt||new Date(last.activatedAt.getTime()+last.snapshot.durationHours*3600000)>new Date()))throw new HttpError(409,'این خدمت خریداری شده یا هنوز فعال است.');
       }
       const created=await tx.hallOrder.create({data:{userId:user.id,listingId:id,listingVersion:row.version,action,planCode:plan.code,snapshot:JSON.parse(JSON.stringify(plan)),amountToman:plan.priceToman,mode:usingWallet?'live':provider.mode,idempotencyKey:input.idempotencyKey,...(usingWallet?{refId:'WALLET-'+input.idempotencyKey}:{})}});
       if(usingWallet){await require('../wallet-spending').spendWallet(tx,user.id,{hallOrderId:created.id,amountToman:created.amountToman});return activate(tx,created,row);}
@@ -116,6 +117,7 @@ function createHall(prisma,config,provider=createZarinpal({...config,ZARINPAL_MO
   }
   async function activate(tx,order,row){
     const boostField=order.planCode==='LADDER'?'ladderUntil':order.planCode==='URGENT'?'urgentUntil':order.planCode==='FEATURED'?'featuredUntil':null;
+    if(row.status==='PENDING_REVIEW'&&order.action==='UPGRADE'&&boostField&&row.version===order.listingVersion)return tx.hallOrder.update({where:{id:order.id},data:{status:'VERIFIED',verifiedAt:new Date(),activatedAt:null,errorCode:'AWAITING_MODERATION'}});
     if(['BLOCKED','REJECTED','DELETED','PENDING_REVIEW'].includes(row.status)||row.version!==order.listingVersion||order.action==='PUBLISH'&&row.status!=='DRAFT'||order.action==='UPGRADE'&&(row.status!=='PUBLISHED'||boostField&&row[boostField]>new Date()))return tx.hallOrder.update({where:{id:order.id},data:{status:'REVIEW_REQUIRED',errorCode:'LISTING_CHANGED',verifiedAt:new Date()}});
     if(order.action==='PUBLISH'){
       await tx.hallListing.update({where:{id:row.id},data:{status:'PENDING_REVIEW',submittedAt:new Date(),moderationNote:null}});

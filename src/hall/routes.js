@@ -12,7 +12,7 @@ function registerHall({app,prisma,redis,config,auth,admin,limit,io,sms}){
   app.use(management,admin);
   require('./chat').registerChat({app,prisma,redis,auth,limit,io});
   const captcha=require('./captcha').createCaptcha(redis);
-  const catalog=async()=>{await service.ready();const[plans,banners]=await Promise.all([prisma.hallPlan.findMany({where:{active:true},orderBy:{sortOrder:'asc'}}),prisma.hallBanner.findMany({where:{active:true},orderBy:[{sortOrder:'asc'},{id:'asc'}]})]);return{plans,banners,paymentMode:'sandbox',walletPaymentAvailable:true,tariffNotice:'درگاه این محیط آزمایشی است؛ پرداخت با کیف پول از موجودی واقعی شما کسر می‌شود.'};};
+  const catalog=async()=>{await service.ready();const[plans,banners]=await Promise.all([prisma.hallPlan.findMany({where:{active:true,code:{not:'URGENT'}},orderBy:{sortOrder:'asc'}}),prisma.hallBanner.findMany({where:{active:true},orderBy:[{sortOrder:'asc'},{id:'asc'}]})]);return{plans,banners,paymentMode:'sandbox',walletPaymentAvailable:true,tariffNotice:'درگاه این محیط آزمایشی است؛ پرداخت با کیف پول از موجودی واقعی شما کسر می‌شود.'};};
   app.get(root+'/catalog',async(_req,res)=>res.json(await catalog()));
   app.get(root+'/vehicles',async(req,res)=>{
     const q=z.object({q:z.string().max(100).default(''),make:z.string().max(100).optional(),model:z.string().max(100).optional()}).parse(req.query);
@@ -21,12 +21,8 @@ function registerHall({app,prisma,redis,config,auth,admin,limit,io,sms}){
   app.get(root+'/listings',async(req,res)=>{
     const q=pageSchema.extend({q:z.string().max(150).default(''),make:z.string().max(100).optional(),model:z.string().max(100).optional(),city:z.string().max(100).optional(),min:z.coerce.number().int().min(0).max(1000000000000).optional(),max:z.coerce.number().int().min(0).max(1000000000000).optional(),yearMin:z.coerce.number().int().min(1300).max(2100).optional(),yearMax:z.coerce.number().int().min(1300).max(2100).optional(),mileageMax:z.coerce.number().int().min(0).max(2000000).optional(),inspection:z.enum(['VERIFIED']).optional(),sort:z.enum(['newest','price_asc','price_desc','mileage']).default('newest')}).parse(req.query);
     const where={status:'PUBLISHED',...(q.q?{AND:normalize(q.q).split(' ').filter(Boolean).map(word=>({searchText:{contains:word}}))}:{}),...(q.make?{makeKey:normalize(q.make)}:{}),...(q.model?{modelKey:normalize(q.model)}:{}),...(q.city?{city:{contains:q.city}}:{}),...(q.min!=null||q.max!=null?{priceToman:{...(q.min!=null?{gte:BigInt(q.min)}:{}),...(q.max!=null?{lte:BigInt(q.max)}:{})}}:{}),...(q.yearMin||q.yearMax?{year:{...(q.yearMin?{gte:q.yearMin}:{}),...(q.yearMax?{lte:q.yearMax}:{})}}:{}),...(q.mileageMax!=null?{mileage:{lte:q.mileageMax}}:{}),...(q.inspection?{inspectionStatus:q.inspection}:{})};
-    const orderBy=q.sort==='price_asc'?{priceToman:'asc'}:q.sort==='price_desc'?{priceToman:'desc'}:q.sort==='mileage'?{mileage:'asc'}:{bumpedAt:'desc'};
-    const[items,total]=await Promise.all([prisma.hallListing.findMany({where,...pagination(q),include,orderBy:[orderBy,{id:'desc'}]}),prisma.hallListing.count({where})]);
-    // Apply the same filters to promotions; rotation is stable for ten minutes and unique in one response.
-    const featured=await prisma.hallListing.findMany({where:{...where,OR:[{featuredUntil:{gt:new Date()}},{ladderUntil:{gt:new Date()}},{urgentUntil:{gt:new Date()}}]},include,take:120,orderBy:{bumpedAt:'desc'}});
-    const offset=(Math.floor(Date.now()/600000)+q.page*6)%Math.max(1,featured.length),rotated=[...featured.slice(offset),...featured.slice(0,offset)];
-    res.set('Cache-Control','no-store').json({items:items.map(r=>listingDto(r)),featured:rotated.map(r=>listingDto(r)),total,page:q.page,limit:q.limit});
+    const result=await require('./feed').hallFeed(prisma,where,q,include);
+    res.set('Cache-Control','no-store').json({...result,items:result.items.map(r=>listingDto(r)),featured:result.featured.map(r=>listingDto(r)),page:q.page,limit:q.limit});
   });
   app.get(root+'/mine',auth,async(req,res)=>{
     const q=pageSchema.parse(req.query),where={ownerId:req.user.id,status:{not:'DELETED'}};const[items,total]=await Promise.all([prisma.hallListing.findMany({where,...pagination(q),include:{...include,_count:{select:{inquiries:true}}},orderBy:{updatedAt:'desc'}}),prisma.hallListing.count({where})]);res.set('Cache-Control','no-store').json({items:items.map(r=>listingDto(r,true)),total,...q});
@@ -54,7 +50,7 @@ function registerHall({app,prisma,redis,config,auth,admin,limit,io,sms}){
   app.post(root+'/mine/:id/publish',auth,limit('hall-publish',20,3600),async(req,res)=>{const id=uuid.parse(req.params.id),input=z.object({proof:uuid}).strict().parse(req.body);await captcha.consume(req.user.id,id,input.proof);res.json(await service.freePublish(id,req.user.id));});
   app.delete(root+'/mine/:id',auth,async(req,res)=>{await service.remove(uuid.parse(req.params.id),req.user.id);res.status(204).end();});
   app.post(root+'/mine/:id/checkout',auth,limit('hall-checkout',20,3600),async(req,res)=>{
-    const input=z.object({planCode:z.enum(['MANAGED','REPAIR_SELL','EXPRESS48','LADDER','URGENT','FEATURED']),idempotencyKey:uuid,method:z.enum(['GATEWAY','WALLET']).default('GATEWAY')}).strict().parse(req.body);
+    const input=z.object({planCode:z.enum(['MANAGED','REPAIR_SELL','EXPRESS48','LADDER','FEATURED']),idempotencyKey:uuid,method:z.enum(['GATEWAY','WALLET']).default('GATEWAY')}).strict().parse(req.body);
     if(['MANAGED','REPAIR_SELL','EXPRESS48'].includes(input.planCode))throw new HttpError(409,'در حال تکمیل بخش فنی');
     res.status(201).json(await service.checkout(req.user,uuid.parse(req.params.id),input));
   });

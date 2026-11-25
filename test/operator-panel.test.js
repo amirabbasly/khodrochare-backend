@@ -75,6 +75,14 @@ test('real migration/Prisma/HTTP: signed operator actions, safe dispatch, user c
   const resubmitted=await hall.freePublish(listing.id,customer.id);assert.equal(resubmitted.status,'PENDING_REVIEW');
   const approved=await call(`/listings/${listing.id}/review`,'POST',{decision:'APPROVE',version:resubmitted.version,note:''});assert.equal(approved.status,200);assert.equal(approved.data.status,'PUBLISHED');
   assert.equal((await call(`/listings/${listing.id}/review`,'POST',{decision:'APPROVE',version:resubmitted.version,note:''})).status,409);
+  assert.equal((await call(`/listings/${listing.id}/delete`,'POST',{version:resubmitted.version})).status,409);
+  assert.equal((await call(`/listings/${listing.id}/delete`,'POST',{version:approved.data.version})).status,200);
+  assert.equal((await prisma.hallListing.findUnique({where:{id:listing.id}})).status,'DELETED');
+  assert.equal((await call('/listings?status=ALL')).data.items.some(row=>row.id===listing.id),false);
+  await assert.rejects(hall.freePublish(listing.id,customer.id),{status:409});
+  assert.equal((await call(`/listings/${listing.id}/delete`,'POST',{version:approved.data.version})).status,200);
+  assert.equal(await prisma.operatorAudit.count({where:{targetId:listing.id,action:'LISTING_DELETE'}}),1);
+  assert.equal(await prisma.hallPhoto.count({where:{listingId:listing.id}}),1);
   const boosts=await prisma.hallPlan.findMany({where:{kind:'BOOST'},orderBy:{sortOrder:'asc'}});assert.deepEqual(boosts.map(row=>[row.priceToman,row.originalPriceToman]),[[99000,320000],[149000,700000],[199000,720000]]);
   const {createCashPayments}=require('../src/cash-payments'),{driverBalance,assertDriverCredit}=require('../src/driver-balance');
   await prisma.assistanceRequest.update({where:{id:job.id},data:{status:'ARRIVED',operationsStartedAt:new Date(),partsQuoteToman:200000,partsApprovedToman:200000}});

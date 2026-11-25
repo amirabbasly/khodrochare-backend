@@ -112,6 +112,18 @@ function registerOperator({app,prisma,redis,config,io,limit}){
   const [total,rows]=await Promise.all([prisma.hallListing.count({where}),prisma.hallListing.findMany({where,include:{...listingInclude,owner:{select:person}},orderBy:[{updatedAt:'desc'},{id:'desc'}],take:q.limit,skip:(q.page-1)*q.limit})]);
   res.json(pageData(q,total,rows.map(row=>({...listingDto(row,true),owner:row.owner}))));
  });
+ app.post(root+'/listings/:id/delete',async(req,res)=>{
+  const listingId=id.parse(req.params.id),input=z.object({version:z.number().int().nonnegative()}).strict().parse(req.body);
+  await prisma.$transaction(async tx=>{
+   await tx.$queryRaw`SELECT id FROM "HallListing" WHERE id=${listingId} FOR UPDATE`;
+   const old=await tx.hallListing.findUnique({where:{id:listingId}});
+   if(!old)throw new HttpError(404,'آگهی پیدا نشد.');
+   if(old.status==='DELETED')return;
+   if(old.version!==input.version)throw new HttpError(409,'نسخهٔ آگهی تغییر کرده است؛ دوباره آن را باز کنید.');
+   await tx.hallListing.update({where:{id:listingId},data:{status:'DELETED',version:{increment:1}}});
+   await audit(tx,req.operatorActor,'LISTING_DELETE',listingId,{version:input.version,previousStatus:old.status});
+  });res.json({deleted:true});
+ });
  app.post(root+'/listings/:id/review',async(req,res)=>{
   const listingId=id.parse(req.params.id),input=z.object({decision:z.enum(['APPROVE','REJECT']),version:z.number().int().nonnegative(),note:z.string().trim().max(2000).default('')}).strict().parse(req.body);
   if(input.decision==='REJECT'&&input.note.length<3)throw new HttpError(400,'علت رد آگهی را بنویسید.');
@@ -126,7 +138,17 @@ function registerOperator({app,prisma,redis,config,io,limit}){
     if(old.draft.contactPhone!==old.owner.phone&&old.draft.contactPhone!==old.verifiedContactPhone)throw new HttpError(409,'شمارهٔ تماس آگهی تأیید نشده است.');
    }
    const now=new Date(),approved=input.decision==='APPROVE';
-   const updated=await tx.hallListing.update({where:{id:listingId},data:{status:approved?'PUBLISHED':'REJECTED',reviewedAt:now,reviewedBy:req.operatorActor.name,moderationNote:input.note||null,...(approved?{publishedAt:now,bumpedAt:now}:{}),version:{increment:1}},include:listingInclude});
+   const boosts={};
+   if(approved){
+    const waiting=await tx.hallOrder.findMany({where:{listingId,status:'VERIFIED',activatedAt:null,action:'UPGRADE',errorCode:'AWAITING_MODERATION'}});
+    for(const order of waiting){
+     const field={LADDER:'ladderUntil',URGENT:'urgentUntil',FEATURED:'featuredUntil'}[order.planCode];
+     if(!field)continue;
+     boosts[field]=new Date(now.getTime()+order.snapshot.durationHours*3600000);
+     await tx.hallOrder.update({where:{id:order.id},data:{activatedAt:now,errorCode:null}});
+    }
+   }
+   const updated=await tx.hallListing.update({where:{id:listingId},data:{status:approved?'PUBLISHED':'REJECTED',reviewedAt:now,reviewedBy:req.operatorActor.name,moderationNote:input.note||null,...(approved?{publishedAt:now,bumpedAt:now,...boosts}:{}),version:{increment:1}},include:listingInclude});
    await audit(tx,req.operatorActor,approved?'LISTING_APPROVE':'LISTING_REJECT',listingId,{note:input.note,version:input.version});return updated;
   });res.json(listingDto(row,true));
  });
