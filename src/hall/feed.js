@@ -16,7 +16,7 @@ async function hallFeed(prisma,where,q,include){
  async function rows(kind,filter,sort){const indices=slots.filter(s=>s.kind===kind).map(s=>s.index);return indices.length?prisma.hallListing.findMany({where:filter,include,skip:indices[0],take:indices.length,orderBy:[sort,{id:'desc'}]}):[];}
  const [ladderRows,normalRows,featured]=await Promise.all([
   rows('ladder',ladderWhere,{bumpedAt:'desc'}),rows('ordinary',ordinaryWhere,normalSort),
-  prisma.hallListing.findMany({where:{AND:[where,{featuredUntil:{gt:now}}]},include,take:120,orderBy:[{featuredUntil:'desc'},{id:'desc'}]}),
+  prisma.hallListing.findMany({where:{AND:[where,{featuredUntil:{gt:now}}]},include,take:6,orderBy:[{featuredUntil:'desc'},{id:'desc'}]}),
  ]);
  let li=0,ni=0;
  return {items:slots.map(s=>s.kind==='ladder'?ladderRows[li++]:normalRows[ni++]).filter(Boolean),featured,total:l+n};

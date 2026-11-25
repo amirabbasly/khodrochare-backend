@@ -10,6 +10,7 @@ async function assertDeletable(db, userId) {
     db.walletReceipt.findFirst({where:{userId,status:'SUBMITTED'},select:{id:true}}),
     db.walletDebit.aggregate({where:{userId},_sum:{amountToman:true}}),
   ]);
+  if(db.goldCampaign&&await db.goldCampaign.findFirst({where:{showroom:{ownerId:userId},balanceToman:{gt:0}}}))throw new HttpError(409,'پیش از حذف حساب، بودجه تبلیغات طلایی را با پشتیبانی تسویه کنید.');
   if (request) throw new HttpError(409, 'پیش از حذف حساب، درخواست امداد فعال خود را پایان دهید یا لغو کنید.');
   if (checkout || order) throw new HttpError(409, 'یک پرداخت درگاه یا بازپرداخت هنوز تعیین تکلیف نشده است؛ ابتدا وضعیت آن را از بخش پرداخت بررسی کنید.');
   if (payment) throw new HttpError(409, 'هزینهٔ یکی از خدمات هنوز تأیید یا تسویه نشده است؛ ابتدا پرداخت آن را تکمیل کنید.');
@@ -21,10 +22,14 @@ async function eraseCustomer(tx, user, at) {
   await assertDeletable(tx, user.id);
   const documents = await tx.document.findMany({ where: { OR: [{ ownerId: user.id }, { vehicle: { userId: user.id } }] }, select: { id: true, storageKey: true } });
   const photos = await tx.hallPhoto.findMany({ where: { listing: { ownerId: user.id } }, select: { storageKey: true } });
+  const showroomPhotos=tx.showroomPhoto?await tx.showroomPhoto.findMany({where:{showroom:{ownerId:user.id}},select:{storageKey:true}}):[];
   // Keep anonymous references required by historical transactions and other
   // participants; erase login credentials and personal profile information.
   await tx.user.update({ where: { id: user.id }, data: { fullName: 'حساب حذف‌شده', phone: `deleted:${user.id}`, nationalId: null, passwordHash: null, phoneVerifiedAt: null, identityDocumentId: null, vehiclePlate: null, vehicleType: null, services: [], deletedAt: at } });
   if(tx.importRequest)await tx.importRequest.deleteMany({where:{userId:user.id}});
+  if(tx.showroomPhoto)await tx.showroomPhoto.deleteMany({where:{showroom:{ownerId:user.id}}});
+  if(tx.showroom)await tx.showroom.updateMany({where:{ownerId:user.id},data:{status:'DISABLED',isActive:false,draft:{}}});
+  if(tx.showroomAccount)await tx.showroomAccount.updateMany({where:{userId:user.id},data:{isActive:false,name:'حذف‌شده',ownerName:'حساب حذف‌شده',address:'حذف‌شده',landline:'00000000000'}});
   await tx.session.deleteMany({ where: { userId: user.id } });
   await tx.customerOtpChallenge.deleteMany({ where: { phone: user.phone } });
   await tx.userLocation.deleteMany({ where: { userId: user.id } });
@@ -36,6 +41,6 @@ async function eraseCustomer(tx, user, at) {
   await tx.hallListing.updateMany({ where: { ownerId: user.id }, data: { status: 'DELETED', draft: {}, searchText: '', inspectionNote: null, featuredUntil: null, urgentUntil: null, ladderUntil: null, version: { increment: 1 } } });
   if (documents.length) await tx.document.deleteMany({ where: { id: { in: documents.map(row => row.id) } } });
   await tx.vehicle.deleteMany({ where: { userId: user.id } });
-  return { deletedUserId: user.id, removedFiles: [...documents, ...photos].map(row => row.storageKey) };
+  return { deletedUserId: user.id, removedFiles: [...documents, ...photos, ...showroomPhotos].map(row => row.storageKey) };
 }
 module.exports = { assertDeletable, eraseCustomer };

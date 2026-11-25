@@ -15,6 +15,7 @@ function registerOperator({app,prisma,redis,config,io,limit}){
  app.use(root,operatorAuth(config,redis),limit('operator-panel',180,60),(_req,res,next)=>{res.set('Cache-Control','no-store');next();});
  const audit=(tx,actor,action,targetId,details={})=>tx.operatorAudit.create({data:{id:randomUUID(),actorId:actor.id,actorRole:actor.role,actorName:actor.name,action,targetId,details}});
  require('./driver-verification').registerDriverReviews({app,root,prisma,config,audit,io});
+ require('../showrooms/operator').registerShowroomReview({app,root,prisma,audit,config});
  require('../import-requests').registerImportReview({app,root,prisma});
  require('./locations').registerRequestLocations({app,root,prisma,config,id});
  app.get(root+'/requests',async(req,res)=>{
@@ -145,7 +146,7 @@ function registerOperator({app,prisma,redis,config,io,limit}){
     for(const order of waiting){
      for(const plan of require('../hall/order-plans').orderPlans(order)){
       const field=require('../hall/order-plans').boostFields[plan.code];
-      if(field)boosts[field]=new Date(now.getTime()+plan.durationHours*3600000);
+      if(field){if(plan.code==='FEATURED')await require('../hall/featured-slots').reserveFeatured(tx,listingId,order.id);boosts[field]=new Date(now.getTime()+(plan.code==='FEATURED'?6:plan.durationHours)*3600000);}
      }
      await tx.hallOrder.update({where:{id:order.id},data:{activatedAt:now,errorCode:null}});
     }

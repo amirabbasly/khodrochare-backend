@@ -11,10 +11,10 @@ async function walletBalance(db,userId){
 }
 // The caller holds the User row lock before any target locks. All wallet
 // spending and cash commission debits serialize on that same account lock.
-async function spendWallet(tx,userId,{paymentId,hallOrderId,amountToman}){
+async function spendWallet(tx,userId,{paymentId,hallOrderId,goldFundingId,amountToman}){
  if(!Number.isSafeInteger(amountToman)||amountToman<=0)throw new HttpError(400,'مبلغ پرداخت معتبر نیست.');
  if(await walletBalance(tx,userId)<amountToman)throw new HttpError(409,'موجودی کیف پول کافی نیست؛ ابتدا حساب را شارژ کنید.');
- return tx.walletDebit.create({data:{userId,paymentId,hallOrderId,amountToman}});
+ return tx.walletDebit.create({data:{userId,paymentId,hallOrderId,goldFundingId,amountToman}});
 }
 async function payRequestWithWallet(prisma,requestId,userId){
  await createPayments(prisma).getOrCreate(requestId,userId);

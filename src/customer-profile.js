@@ -2,6 +2,8 @@ const profileComplete = user => Boolean(user.fullName?.trim() && user.nationalId
 const customerFlags = user => user.role === 'CUSTOMER' ? { profileComplete: profileComplete(user), hasPassword: Boolean(user.passwordHash) } : {};
 function requiresCompleteProfile(req) {
   if (req.user.role !== 'CUSTOMER' || req.user.profileComplete !== false) return false;
+  if(req.path.startsWith('/api/v1/showrooms'))return false;
+  if(req.user.showroomAccess&&/^\/api\/v1\/(hall|wallet)(\/|$)/.test(req.path))return false;
   const allowed = ['/api/v1/auth/logout', '/api/v1/me/complete-profile', '/api/v1/me/location', '/api/v1/me/account-deletion/otp'];
   if (req.path === '/api/v1/me' && ['DELETE','PATCH'].includes(req.method)) return false;
   if (allowed.includes(req.path)) return false;

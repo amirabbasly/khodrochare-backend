@@ -97,7 +97,7 @@ function createHall(prisma,config,provider=createZarinpal({...config,ZARINPAL_MO
       if(!['DRAFT','PUBLISHED','PENDING_REVIEW','REJECTED'].includes(row.status))throw new HttpError(409,'آگهی در وضعیت قابل انتشار نیست.');
       await validatePublish(tx,row);
       const plans=[];
-      for(const code of codes){const plan=await tx.hallPlan.findUnique({where:{code}});if(!plan?.active||plan.code==='URGENT'||plan.priceToman<=0)throw new HttpError(400,'خدمات انتخاب‌شده معتبر نیست.');plans.push(plan);}
+      for(const code of codes){const stored=await tx.hallPlan.findUnique({where:{code}});const plan=stored?.code==='FEATURED'?{...stored,durationHours:6}:stored;if(!plan?.active||plan.code==='URGENT'||plan.priceToman<=0)throw new HttpError(400,'خدمات انتخاب‌شده معتبر نیست.');plans.push(plan);}
       const draftBoost=row.status==='DRAFT'&&codes.every(code=>['LADDER','FEATURED'].includes(code));
       if(draftBoost&&JSON.stringify([...(row.requestedBoosts||[])].sort())!==JSON.stringify(codes))throw new HttpError(409,'ابتدا آگهی و خدمات انتخاب‌شده را برای انتشار تأیید کنید.');
       if(plans.some(p=>p.kind!==(action==='PUBLISH'&&!draftBoost?'PLAN':'BOOST')))throw new HttpError(400,'طرح انتخاب‌شده معتبر نیست.');
@@ -113,6 +113,7 @@ function createHall(prisma,config,provider=createZarinpal({...config,ZARINPAL_MO
       const bought=await tx.hallOrder.findMany({where:{listingId:id,status:'VERIFIED'}});
       if(bought.some(o=>orderPlans(o).some(p=>codes.includes(p.code)&&(!o.activatedAt||new Date(o.activatedAt.getTime()+p.durationHours*3600000)>new Date()))))throw new HttpError(409,'این خدمت خریداری شده یا هنوز فعال است.');
       const created=await tx.hallOrder.create({data:{userId:user.id,listingId:id,listingVersion:row.version,action,planCode:plan.code,snapshot:JSON.parse(JSON.stringify(plan)),amountToman:plan.priceToman,mode:usingWallet?'live':provider.mode,idempotencyKey:input.idempotencyKey,...(usingWallet?{refId:'WALLET-'+input.idempotencyKey}:{})}});
+      if(codes.includes('FEATURED'))await require('./featured-slots').reserveFeatured(tx,id,created.id,usingWallet?360:10);
       if(usingWallet){await require('../wallet-spending').spendWallet(tx,user.id,{hallOrderId:created.id,amountToman:created.amountToman});return activate(tx,created,row);}
       return created;
     });
@@ -124,11 +125,12 @@ function createHall(prisma,config,provider=createZarinpal({...config,ZARINPAL_MO
       const callback=new URL('/api/v1/hall/payments/callback',config.PAYMENT_CALLBACK_URL||'https://api.khodrochare.ir');callback.searchParams.set('order',order.id);
       const response=await provider.request({amountToman:order.amountToman,callbackUrl:callback.href,description:'تالار خودرو چاره: '+order.snapshot.name,mobile:user.phone});
       return orderDto(await prisma.hallOrder.update({where:{id:order.id},data:{status:'PENDING',authority:response.authority,errorCode:null}}));
-    }catch(error){await prisma.hallOrder.updateMany({where:{id:order.id,status:'CREATING'},data:{status:'FAILED',errorCode:'GATEWAY_REQUEST_FAILED'}});throw error;}
+    }catch(error){if(codes.includes('FEATURED'))await prisma.featuredSlot.updateMany({where:{orderId:order.id},data:{reservedUntil:new Date()}});await prisma.hallOrder.updateMany({where:{id:order.id,status:'CREATING'},data:{status:'FAILED',errorCode:'GATEWAY_REQUEST_FAILED'}});throw error;}
   }
   async function activate(tx,order,row){
-    const selected=orderPlans(order),boostField=boostFields[order.planCode];
+    const selected=orderPlans(order).map(p=>p.code==='FEATURED'?{...p,durationHours:6}:p),boostField=boostFields[order.planCode];
     const allBoosts=selected.every(p=>boostFields[p.code]);
+    if(selected.some(p=>p.code==='FEATURED')){try{await require('./featured-slots').reserveFeatured(tx,row.id,order.id);}catch(error){if(error.status!==409)throw error;return tx.hallOrder.update({where:{id:order.id},data:{status:'REVIEW_REQUIRED',verifiedAt:new Date(),errorCode:'FEATURED_CAPACITY'}});}}
     if(allBoosts&&row.version===order.listingVersion&&['DRAFT','PENDING_REVIEW'].includes(row.status)){
       if(row.status==='DRAFT'){
         if(JSON.stringify([...(row.requestedBoosts||[])].sort())!==JSON.stringify(selected.map(p=>p.code).sort()))return tx.hallOrder.update({where:{id:order.id},data:{status:'REVIEW_REQUIRED',errorCode:'LISTING_CHANGED',verifiedAt:new Date()}});
@@ -155,7 +157,7 @@ function createHall(prisma,config,provider=createZarinpal({...config,ZARINPAL_MO
     if(!order||!order.authority||order.authority!==authority)throw new HttpError(404,'پرداخت پیدا نشد.');
     if(['VERIFIED','REVIEW_REQUIRED'].includes(order.status))return order;
     // Cancellations are user decisions, not proof of a successful payment.
-    if(status!=='OK')return prisma.$transaction(async tx=>{await lock(tx,order.listingId);const current=await tx.hallOrder.findUnique({where:{id}});return ['VERIFIED','REVIEW_REQUIRED'].includes(current.status)?current:tx.hallOrder.update({where:{id},data:{status:'CANCELLED'}});});
+    if(status!=='OK')return prisma.$transaction(async tx=>{await lock(tx,order.listingId);const current=await tx.hallOrder.findUnique({where:{id}});if(['VERIFIED','REVIEW_REQUIRED'].includes(current.status))return current;if(orderPlans(current).some(p=>p.code==='FEATURED'))await tx.featuredSlot.updateMany({where:{orderId:id},data:{reservedUntil:new Date()}});return tx.hallOrder.update({where:{id},data:{status:'CANCELLED'}});});
     const result=await provider.verify(order);
     return prisma.$transaction(async tx=>{
       await lock(tx,order.listingId);const current=await tx.hallOrder.findUnique({where:{id}});

@@ -24,6 +24,7 @@ function createApp({ prisma, redis, config, io, services: s, otpSms }) {
   app.set('trust proxy', config.TRUST_PROXY);
   app.use(helmet());
   app.use(cors({ origin: config.origins, credentials: true, exposedHeaders: ['X-Session-Expires-At'] }));
+  app.use('/api/v1/operator/showrooms',express.json({limit:'12mb'}));
   app.use(express.json({ limit: '256kb', verify: (req,_res,buffer) => { req.bodyBytes=buffer.length; } }));
   const auth = async (req, res, next) => {
     try {
@@ -35,6 +36,7 @@ function createApp({ prisma, redis, config, io, services: s, otpSms }) {
         // Refresh persistent cookies only; explicit logout always removes them.
         if (cookieToken(req.headers.cookie, req.user.role)) setSessionCookie(res, session, config, req.get("X-Session-Persistence") !== "browser");
       } else req.user = await s.authenticate(req.token);
+      if(req.user.profileComplete===false&&/^\/api\/v1\/(hall|wallet|me)(\/|$)/.test(req.path)&&prisma.showroomAccount)req.user.showroomAccess=Boolean((await prisma.showroomAccount.findUnique({where:{userId:req.user.id}}))?.isActive);
       if (requiresCompleteProfile(req)) return res.status(403).json({ error: 'برای استفاده از این بخش، مشخصات هویتی حساب را تکمیل کنید.', code: 'PROFILE_INCOMPLETE' });
       if (require('./driver-verification').restrictedDriverAction(req)) throw new d.HttpError(403, require('./driver-verification').pendingMessage);
       next();
@@ -53,6 +55,7 @@ function createApp({ prisma, redis, config, io, services: s, otpSms }) {
   require('./verification-documents').registerVerificationDocuments({app,prisma,services:s,auth,role});
   require('./driver-verification').registerVerificationNotices({app,prisma,auth,role});
   require('./driver-auth').registerDriverAuth({ app, prisma, config, services: s, limit, io, sms: otpSms });
+  require('./showrooms/routes').registerShowrooms({app,prisma,redis,config,auth,role,limit,services:s,sms:otpSms});
   require('./import-requests').registerImportRequests({app,prisma,redis,auth,limit});
   require('./operator/routes').registerOperator({app,prisma,redis,config,io,limit});
   app.get('/health/live', (req, res) => res.json({ status: 'ok' }));

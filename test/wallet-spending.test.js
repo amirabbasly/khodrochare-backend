@@ -23,7 +23,7 @@ test('real receipt/spending migrations: Hall wallet mode regression, image-only 
   }
   const migration=name=>fs.readFile(path.join(__dirname,'../prisma/migrations',name,'migration.sql'),'utf8');
   const receiptSql=await migration('202611230004_onsite_cash_receipts');await db.exec(receiptSql.slice(receiptSql.indexOf('CREATE TABLE "WalletReceipt"'),receiptSql.indexOf('ALTER TABLE "WalletEntry"')));
-  await db.exec(await migration('202611240005_receipt_review_amount'));await db.exec(await migration('202611240006_wallet_spending'));
+  await db.exec(await migration('202611240005_receipt_review_amount'));await db.exec(await migration('202611240006_wallet_spending'));await db.exec('ALTER TABLE "HallListing" DROP COLUMN "showroomId"');await db.exec(await migration('202611250001_showrooms'));
   await db.exec('CREATE UNIQUE INDEX "HallPlan_code_key" ON "HallPlan"(code);CREATE UNIQUE INDEX "HallOrder_userId_idempotencyKey_key" ON "HallOrder"("userId","idempotencyKey");');
   await tcp.start();prisma=new PrismaClient({datasources:{db:{url:`postgresql://postgres:postgres@${tcp.getServerConn()}/postgres?schema=public&connection_limit=1&sslmode=disable`}},transactionOptions:{timeout:30000,maxWait:30000}});
   const customer=await prisma.user.create({data:{role:'CUSTOMER',fullName:'مشتری تست',phone:'09120000001',nationalId:'1234567891',passwordHash:'test',services:[]}}),other=await prisma.user.create({data:{role:'CUSTOMER',fullName:'مشتری دوم',phone:'09120000003',services:[]}}),driver=await prisma.user.create({data:{role:'DRIVER',fullName:'امدادگر تست',phone:'09120000002',verificationStatus:'PENDING',services:['REPAIR','TOWING','PERIODIC_SERVICE','MOBILE_CARWASH','INSPECTION']}});
