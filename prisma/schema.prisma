@@ -41,6 +41,7 @@ model User {
   vehicleType String?
   activityCity String?
   activityDistrict String?
+  noDrivingLicense Boolean @default(false)
   services Service[]
   identityDocumentId String? @unique
   verificationStatus String @default("PENDING")

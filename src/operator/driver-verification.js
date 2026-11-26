@@ -2,7 +2,7 @@ const {z}=require('zod');
 const d=require('../domain');
 const {readFile}=require('node:fs/promises');
 const path=require('node:path');
-const fields={id:true,fullName:true,phone:true,nationalId:true,vehiclePlate:true,vehicleType:true,activityCity:true,activityDistrict:true,services:true,isActive:true,identityDocumentId:true,verificationStatus:true,verificationVersion:true,verificationReviewedAt:true,verificationReviewedBy:true,verificationNote:true,createdAt:true};
+const fields={id:true,fullName:true,phone:true,nationalId:true,vehiclePlate:true,vehicleType:true,activityCity:true,activityDistrict:true,noDrivingLicense:true,services:true,isActive:true,identityDocumentId:true,verificationStatus:true,verificationVersion:true,verificationReviewedAt:true,verificationReviewedBy:true,verificationNote:true,createdAt:true};
 const id=z.string().uuid();
 function registerDriverReviews({app,root,prisma,config,audit,io}){
  async function driver(db,userId){const row=await db.user.findUnique({where:{id:userId},select:{...fields,role:true,deletedAt:true}});if(!row||row.role!=='DRIVER'||row.deletedAt)throw new d.HttpError(404,'امدادگر پیدا نشد.');return row;}

@@ -7,7 +7,7 @@ function registerDriverAuth({ app, prisma, config, services, limit, io, sms }) {
     const { password, identityDocument,birthCertificate,drivingLicense,vehicleOwnershipDocument,vehicleEvidenceType, ...data } = input;
     const user = await tx.user.create({ data: { ...data, role: 'DRIVER', passwordHash: await d.hashPassword(password), phoneVerifiedAt: new Date() } });
     const {attachVerificationDocument}=require('./verification-documents');
-    for(const [kind,reference] of [['NATIONAL_ID',identityDocument],['BIRTH_CERTIFICATE',birthCertificate],['DRIVING_LICENSE',drivingLicense],['VEHICLE_OWNERSHIP',vehicleOwnershipDocument]])await attachVerificationDocument(tx,services,user.id,kind,reference,vehicleEvidenceType);
+    for(const [kind,reference] of [['NATIONAL_ID',identityDocument],['BIRTH_CERTIFICATE',birthCertificate],['DRIVING_LICENSE',drivingLicense],['VEHICLE_OWNERSHIP',vehicleOwnershipDocument]])if(reference)await attachVerificationDocument(tx,services,user.id,kind,reference,vehicleEvidenceType);
     return tx.user.update({ where: { id: user.id }, data: { identityDocumentId: identityDocument.id },include:{documents:{select:require('./verification-documents').documentSelect}} });
   } });
   const root = '/api/v1/auth/drivers';
@@ -27,6 +27,8 @@ function registerDriverAuth({ app, prisma, config, services, limit, io, sms }) {
     const { challengeId, code: value, ...body } = req.body || {};
     const registration = d.driverRegistration.parse(body);
     const input = z.object(code).parse({ challengeId, code: value });
+    if(!registration.noDrivingLicense&&!registration.drivingLicense)throw new d.HttpError(400,'گواهینامه را بارگذاری کنید یا گزینه «گواهینامه ندارم» را انتخاب کنید.');
+    if(registration.noDrivingLicense&&registration.drivingLicense)throw new d.HttpError(400,'گواهینامه و گزینه نداشتن گواهینامه را هم‌زمان انتخاب نکنید.');
     const { session } = await service.consume({ ...input, registration });
     setSessionCookie(res, session, config);
     res.status(201).set('Cache-Control', 'no-store').json(session);

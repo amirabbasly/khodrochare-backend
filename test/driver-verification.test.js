@@ -52,7 +52,7 @@ test('driver verification: pending login and offers, private document review, ve
   const challenge=await call('/auth/drivers/otp/request','POST',{phone:registerPhone,purpose:'REGISTER'});assert.equal(challenge.status,200);
   const baseId='123456780',remainder=[...baseId].reduce((sum,value,index)=>sum+Number(value)*(10-index),0)%11;
   const registrationInput={challengeId:challenge.data.challengeId,code:sent.at(-1).code,phone:registerPhone,fullName:'امدادگر تازه ثبت نام شده',nationalId:baseId+(remainder<2?remainder:11-remainder),password:'driverPassword123',services:['REPAIR'],activityCity:'شیراز',vehicleType:'نیسان',vehiclePlate:'12 ب 345',identityDocument:{id:registrationDoc.id,token:uploadToken},...additional,vehicleEvidenceType:'INSURANCE'};
-  for(const key of ['identityDocument','birthCertificate','drivingLicense','vehicleOwnershipDocument','vehicleEvidenceType']){const invalid={...registrationInput};delete invalid[key];assert.equal((await call('/auth/drivers/register','POST',invalid)).status,400);}
+  for(const key of ['identityDocument','drivingLicense']){const invalid={...registrationInput};delete invalid[key];assert.equal((await call('/auth/drivers/register','POST',invalid)).status,400);}
   const registered=await call('/auth/drivers/register','POST',registrationInput);
   assert.equal(registered.data.user.documents.filter(doc=>doc.verificationKind).length,4);
   assert.equal(registered.status,201,JSON.stringify(registered));assert.equal(registered.data.user.verificationStatus,'PENDING');assert.equal(registered.data.user.registrationNoticeSeenAt,null);assert.equal((await call('/me','GET',undefined,registered.data.token)).status,200);
@@ -124,6 +124,18 @@ test('driver verification: pending login and offers, private document review, ve
    const resubmitted=await call('/me/verification-documents/submit','POST',{},fresh.data.token);assert.equal(resubmitted.status,200);
    assert.equal((await operator(`/driver-verifications/${driver.id}/review`,'POST',{version:resubmitted.data.verificationVersion,decision:'APPROVE'})).status,200);
    assert.equal((await call('/me/verification-documents','POST',{kind:'NATIONAL_ID',document:reference},registered.data.token)).status,400);
+  }
+  for(const noDrivingLicense of [true,false]){
+   const phone=noDrivingLicense?'09120000081':'09120000082';
+   const nextChallenge=await call('/auth/drivers/otp/request','POST',{phone,purpose:'REGISTER'});
+   async function reference(){const token=randomUUID()+randomUUID(),file=await prisma.document.create({data:{storageKey:randomUUID(),mimeType:'image/png',uploadTokenHash:d.hash(token)}});return {id:file.id,token};}
+   const minimal={...registrationInput,challengeId:nextChallenge.data.challengeId,code:sent.at(-1).code,phone,identityDocument:await reference(),noDrivingLicense};
+   delete minimal.birthCertificate;delete minimal.vehicleOwnershipDocument;delete minimal.vehicleEvidenceType;delete minimal.drivingLicense;
+   if(!noDrivingLicense)minimal.drivingLicense=await reference();
+   const response=await call('/auth/drivers/register','POST',minimal);assert.equal(response.status,201,JSON.stringify(response));assert.equal(response.data.user.noDrivingLicense,noDrivingLicense);assert.equal(response.data.user.documents.length,noDrivingLicense?1:2);
+   if(noDrivingLicense){assert.equal((await call('/me/driving-license','PATCH',{noDrivingLicense:false},response.data.token)).status,200);assert.equal((await call('/me/verification-documents/submit','POST',{},response.data.token)).status,409);assert.equal((await call('/me/driving-license','PATCH',{noDrivingLicense:true},response.data.token)).status,200);}
+   const current=(await call('/me','GET',undefined,response.data.token)).data;
+   const approval=await operator(`/driver-verifications/${current.id}/review`,'POST',{version:current.verificationVersion,decision:'APPROVE'});assert.equal(approval.status,200,JSON.stringify(approval));
   }
   await fs.unlink(path.join(uploads,storageKey));await fs.rmdir(uploads);
  }finally{if(server)await new Promise(r=>server.close(r));if(prisma)await prisma.$disconnect();await tcp.stop();await db.close();}
