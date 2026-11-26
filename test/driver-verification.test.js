@@ -26,6 +26,7 @@ test('driver verification: pending login and offers, private document review, ve
   const legacyDoc=randomUUID();await db.query('INSERT INTO "Document" (id,"storageKey","mimeType","ownerId") VALUES ($1,$2,$3,$4)',[legacyDoc,randomUUID(),'image/png',legacyId]);await db.query('UPDATE "User" SET "identityDocumentId"=$1 WHERE id=$2',[legacyDoc,legacyId]);
   await db.exec(await require('node:fs/promises').readFile(require('node:path').join(__dirname,'../prisma/migrations/202611240004_verification_documents/migration.sql'),'utf8'));
   assert.equal((await db.query('SELECT "verificationKind" FROM "Document" WHERE id=$1',[legacyDoc])).rows[0].verificationKind,'LEGACY_IDENTITY');await db.query('UPDATE "User" SET "identityDocumentId"=NULL WHERE id=$1',[legacyId]);await db.query('DELETE FROM "Document" WHERE id=$1',[legacyDoc]);await db.query('DELETE FROM "User" WHERE id=$1',[legacyId]);
+  await db.exec(await require("node:fs/promises").readFile(require("node:path").join(__dirname,"../prisma/migrations/202611260001_driver_affiliation/migration.sql"),"utf8"));
   await tcp.start();prisma=new PrismaClient({datasources:{db:{url:`postgresql://postgres:postgres@${tcp.getServerConn()}/postgres?schema=public&connection_limit=1&sslmode=disable`}},transactionOptions:{timeout:20000}});
   const d=require('../src/domain'),{bridgeSignature}=require('../src/operator/auth');
   const passwordHash=await d.hashPassword('driverPassword123');

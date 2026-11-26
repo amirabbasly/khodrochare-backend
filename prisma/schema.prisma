@@ -25,6 +25,7 @@ enum RequestStatus {
   CANCELLED
 }
 model User {
+  affiliation DriverAffiliation?
   showroomAccount ShowroomAccount?
   importRequests ImportRequest[]
   id String @id @default(uuid())
@@ -1090,4 +1091,13 @@ model FeaturedSlot {
  orderId String? @unique
  order HallOrder? @relation(fields:[orderId],references:[id])
  reservedUntil DateTime?
+}
+
+model DriverAffiliation {
+ userId String @id
+ user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+ branding Boolean
+ activity String?
+ companyName String?
+ updatedAt DateTime @default(now())
 }

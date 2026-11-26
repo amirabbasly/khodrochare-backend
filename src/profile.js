@@ -9,6 +9,7 @@ function profileInput(role, body) {
   return z.object(role==='DRIVER'?{...base,activityCity:z.string().trim().min(2).max(100).optional(),activityDistrict:z.string().trim().max(150).optional()}:base).strict().refine(value=>Object.keys(value).length>0,'اطلاعاتی برای ذخیره وارد کنید.').parse(body);
 }
 function registerProfile({app,prisma,config,auth,limit,io,sms}) {
+  require('./driver-affiliation').register({app,prisma,auth});
   const services = createServices({prisma,config});
   const otp = createCustomerAuth({prisma,config,services,sms});
   app.patch('/api/v1/me',auth,async(req,res)=>{

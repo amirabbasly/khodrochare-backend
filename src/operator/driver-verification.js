@@ -15,7 +15,7 @@ function registerDriverReviews({app,root,prisma,config,audit,io}){
  app.get(root+'/driver-verifications/:id',async(req,res)=>{
   const user=await driver(prisma,id.parse(req.params.id));
   const documents=await prisma.document.findMany({where:{ownerId:user.id},select:require('../verification-documents').documentSelect,orderBy:{createdAt:'desc'}});
-  await audit(prisma,req.operatorActor,'DRIVER_REVIEW_VIEW',user.id);res.json({user,documents});
+  await audit(prisma,req.operatorActor,'DRIVER_REVIEW_VIEW',user.id);res.json({user,documents,affiliation:await require("../driver-affiliation").read(prisma,user.id)});
  });
  app.get(root+'/driver-verifications/:id/documents/:documentId',async(req,res)=>{
   const user=await driver(prisma,id.parse(req.params.id));
