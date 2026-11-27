@@ -88,11 +88,19 @@ function createGatewayPayments(prisma,config,provider=createZarinpal(config)){
     });
   }
   async function wallet(userId){
-    const[groups,entries,earnings,debits]=await Promise.all([prisma.walletEntry.groupBy({by:['mode'],where:{userId},_sum:{amountToman:true}}),prisma.walletEntry.findMany({where:{userId},orderBy:{createdAt:'desc'},take:50,select:{id:true,mode:true,amountToman:true,createdAt:true}}),prisma.driverEarning.aggregate({where:{driverId:userId,payment:{method:{not:'CASH'}}},_sum:{amountToman:true}}),prisma.walletDebit.findMany({where:{userId},orderBy:{createdAt:'desc'},take:50}),]);
-    const spent=await prisma.walletDebit.aggregate({where:{userId},_sum:{amountToman:true}});
-    const history=[...entries.map(entry=>({...entry,kind:entry.amountToman<0?'CASH_COMMISSION':'TOPUP'})),...debits.map(entry=>({...entry,mode:'live',amountToman:-entry.amountToman,kind:entry.goldFundingId?'GOLD_FUNDING':entry.hallOrderId?'HALL_PAYMENT':'REQUEST_PAYMENT'}))].sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt)).slice(0,50);
-    return{balanceToman:(groups.find(g=>g.mode==='live')?._sum.amountToman||0)+(earnings._sum.amountToman||0)-(spent._sum.amountToman||0),sandboxBalanceToman:groups.find(g=>g.mode==='sandbox')?._sum.amountToman||0,mode:provider.mode,entries:history};
+    return prisma.$transaction(async tx=>{
+      const [summary,groups,entries,debits,income]=await Promise.all([
+        require('./wallet-summary').walletSummary(tx,userId),
+        tx.walletEntry.groupBy({by:['mode'],where:{userId},_sum:{amountToman:true}}),
+        tx.walletEntry.findMany({where:{userId},orderBy:{createdAt:'desc'},take:50,select:{id:true,mode:true,amountToman:true,createdAt:true,payment:{select:{requestId:true,amountToman:true,commissionToman:true,commissionPercent:true}}}}),
+        tx.walletDebit.findMany({where:{userId},orderBy:{createdAt:'desc'},take:50}),
+        tx.driverEarning.findMany({where:{driverId:userId,payment:{method:{not:'CASH'}}},orderBy:{createdAt:'desc'},take:50,select:{id:true,amountToman:true,createdAt:true}}),
+      ]);
+      const history=[...entries.map(entry=>({...entry,kind:entry.amountToman<0?'CASH_COMMISSION':'TOPUP'})),...debits.map(entry=>({...entry,mode:'live',amountToman:-entry.amountToman,kind:entry.goldFundingId?'GOLD_FUNDING':entry.hallOrderId?'HALL_PAYMENT':'REQUEST_PAYMENT'})),...income.map(entry=>({...entry,mode:'live',kind:'SERVICE_EARNING'}))].sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt)).slice(0,50);
+      return {balanceToman:summary.balanceToman,summary,sandboxBalanceToman:groups.find(g=>g.mode==='sandbox')?._sum.amountToman||0,mode:provider.mode,entries:history};
+    },{isolationLevel:'RepeatableRead'});
   }
+
   return{start,verify,wallet,present};
 }
 module.exports={createGatewayPayments,safePayment};

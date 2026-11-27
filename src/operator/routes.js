@@ -71,7 +71,7 @@ function registerOperator({app,prisma,redis,config,io,limit}){
    prisma.hallListing.count({where:{ownerId:userId,status:{not:'DELETED'}}}),prisma.driverEarning.aggregate({where:{driverId:userId},_sum:{amountToman:true}}),
    prisma.walletEntry.groupBy({by:['mode'],where:{userId},_sum:{amountToman:true}}),prisma.supportTicket.findMany({where:{userId},orderBy:{updatedAt:'desc'},take:20}),
    prisma.operatorAudit.findMany({where:{targetId:userId},orderBy:{createdAt:'desc'},take:50}),
-  ]);await audit(prisma,req.operatorActor,'USER_VIEW',userId);res.json({user,requests,listingCount,balanceToman:user.role==='DRIVER'?await require('../driver-balance').driverBalance(prisma,userId):wallet.find(entry=>entry.mode==='live')?._sum.amountToman||0,driverEarningsToman:earnings._sum.amountToman||0,wallet,tickets,activity});
+  ]);await audit(prisma,req.operatorActor,'USER_VIEW',userId);res.json({user,requests,listingCount,balanceToman:await require('../wallet-spending').walletBalance(prisma,userId),driverEarningsToman:earnings._sum.amountToman||0,wallet,tickets,activity});
  });
  app.patch(root+'/users/:id/active',async(req,res)=>{
   const userId=id.parse(req.params.id),input=z.object({isActive:z.boolean(),reason:z.string().trim().min(3).max(1000)}).strict().parse(req.body);
