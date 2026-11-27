@@ -14,6 +14,7 @@ function registerOperator({app,prisma,redis,config,io,limit}){
  const root='/api/v1/operator';
  app.use(root,operatorAuth(config,redis),limit('operator-panel',180,60),(_req,res,next)=>{res.set('Cache-Control','no-store');next();});
  const audit=(tx,actor,action,targetId,details={})=>tx.operatorAudit.create({data:{id:randomUUID(),actorId:actor.id,actorRole:actor.role,actorName:actor.name,action,targetId,details}});
+ require('./account-deletion').registerAccountDeletion({app,root,prisma,config,io,audit});
  require('./driver-verification').registerDriverReviews({app,root,prisma,config,audit,io});
  require('../showrooms/operator').registerShowroomReview({app,root,prisma,audit,config});
  require('../import-requests').registerImportReview({app,root,prisma});

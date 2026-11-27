@@ -1,7 +1,7 @@
 const {z}=require('zod');
 const d=require('./domain');
 const pendingMessage='احراز هویت شما در صف بررسی قرار دارد. اگر مشکلی در اطلاعات یا مدارک باشد، اپراتور با شماره تماس ثبت‌شده شما تماس می‌گیرد.';
-function assertVerifiedDriver(user){if(user.role==='DRIVER'&&user.verificationStatus!=='APPROVED')throw new d.HttpError(403,pendingMessage);}
+function assertVerifiedDriver(user){if(!user||user.isActive===false||user.deletedAt)throw new d.HttpError(403,'حساب غیرفعال یا حذف شده است.');if(user.role==='DRIVER'&&user.verificationStatus!=='APPROVED')throw new d.HttpError(403,pendingMessage);}
 function restrictedDriverAction(req){
  if(req.user?.role!=='DRIVER'||req.user.verificationStatus==='APPROVED'||['GET','HEAD','OPTIONS'].includes(req.method))return false;
  // Authentication, profile, documents, support and telemetry remain available.

@@ -25,11 +25,13 @@ async function eraseCustomer(tx, user, at) {
   const showroomPhotos=tx.showroomPhoto?await tx.showroomPhoto.findMany({where:{showroom:{ownerId:user.id}},select:{storageKey:true}}):[];
   // Keep anonymous references required by historical transactions and other
   // participants; erase login credentials and personal profile information.
-  await tx.user.update({ where: { id: user.id }, data: { fullName: 'حساب حذف‌شده', phone: `deleted:${user.id}`, nationalId: null, passwordHash: null, phoneVerifiedAt: null, identityDocumentId: null, vehiclePlate: null, vehicleType: null, services: [], deletedAt: at } });
+  await tx.user.update({ where: { id: user.id }, data: { isActive:false,activityCity:null,activityDistrict:null,noDrivingLicense:false,verificationNote:null,verificationReviewedAt:null,verificationReviewedBy:null,fullName: 'حساب حذف‌شده', phone: `deleted:${user.id}`, nationalId: null, passwordHash: null, phoneVerifiedAt: null, identityDocumentId: null, vehiclePlate: null, vehicleType: null, services: [], deletedAt: at } });
   if(tx.importRequest)await tx.importRequest.deleteMany({where:{userId:user.id}});
   if(tx.showroomPhoto)await tx.showroomPhoto.deleteMany({where:{showroom:{ownerId:user.id}}});
   if(tx.showroom)await tx.showroom.updateMany({where:{ownerId:user.id},data:{status:'DISABLED',isActive:false,draft:{}}});
   if(tx.showroomAccount)await tx.showroomAccount.updateMany({where:{userId:user.id},data:{isActive:false,name:'حذف‌شده',ownerName:'حساب حذف‌شده',address:'حذف‌شده',landline:'00000000000'}});
+  if(tx.driverAffiliation)await tx.driverAffiliation.deleteMany({where:{userId:user.id}});
+  if(tx.driverLocation)await tx.driverLocation.deleteMany({where:{driverId:user.id}});
   await tx.session.deleteMany({ where: { userId: user.id } });
   await tx.customerOtpChallenge.deleteMany({ where: { phone: user.phone } });
   await tx.userLocation.deleteMany({ where: { userId: user.id } });
